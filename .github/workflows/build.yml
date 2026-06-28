@@ -1,0 +1,19 @@
+name: Build
+on:
+  - push
+  - workflow_dispatch
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: CHECKOUT REPOSITORY
+        uses: actions/checkout@v5
+      - name: SETUP JAVA JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: BUILD
+        uses: gradle/gradle-build-action@v2.4.2
+        with:
+          arguments: build
