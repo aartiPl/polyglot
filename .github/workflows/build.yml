@@ -6,14 +6,17 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: CHECKOUT REPOSITORY
+      - name: Checkout repository...
         uses: actions/checkout@v7
-      - name: SETUP JAVA JDK
+
+      - name: Setup Java...
         uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
-      - name: BUILD
+
+      - name: Setup Gradle...
         uses: gradle/actions/setup-gradle@v6
-        with:
-          arguments: build
+
+      - name: Run build...
+        run: ./gradlew build
