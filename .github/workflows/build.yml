@@ -7,13 +7,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: CHECKOUT REPOSITORY
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
       - name: SETUP JAVA JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
       - name: BUILD
-        uses: gradle/gradle-build-action@v2.4.2
+        uses: gradle/actions/setup-gradle@v6
         with:
           arguments: build
