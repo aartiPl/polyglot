@@ -5,8 +5,6 @@ plugins {
     id("com.vanniktech.maven.publish")
 }
 
-group = "net.igsoft.polyglot.compose"
-
 kotlin {
     jvm()
     jvmToolchain(17)

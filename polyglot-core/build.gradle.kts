@@ -4,8 +4,6 @@ plugins {
     id("com.vanniktech.maven.publish")
 }
 
-group = "net.igsoft.polyglot.core"
-
 kotlin {
     jvm()
     jvmToolchain(17)

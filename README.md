@@ -38,7 +38,7 @@ Add the dependency you need:
 
 ```kotlin
 dependencies {
-    implementation("net.igsoft.polyglot.core:polyglot-core:<version>")
+    implementation("net.igsoft.polyglot:polyglot-core:<version>")
 }
 ```
 
@@ -46,7 +46,7 @@ For Jetpack Compose or Compose Multiplatform integration:
 
 ```kotlin
 dependencies {
-    implementation("net.igsoft.polyglot.compose:polyglot-compose:<version>")
+    implementation("net.igsoft.polyglot:polyglot-compose:<version>")
 }
 ```
 
