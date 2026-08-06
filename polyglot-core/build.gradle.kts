@@ -11,6 +11,7 @@ kotlin {
         namespace = "net.igsoft.polyglot.core"
         compileSdk = 37
         minSdk = 23
+        withHostTest {}
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }

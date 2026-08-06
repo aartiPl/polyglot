@@ -12,4 +12,9 @@ object MsgLocales {
 
     val PL_PL: MsgLocale
         get() = MsgLocale.of("pl-PL")
+
+    val DE get() = MsgLocale.of("de")
+    val ES get() = MsgLocale.of("es")
+    val FR get() = MsgLocale.of("fr")
+    val IT get() = MsgLocale.of("it")
 }

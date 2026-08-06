@@ -30,7 +30,7 @@ fun calculateVersion(baseVersion: String): String {
 }
 
 group = "net.igsoft.polyglot"
-version = calculateVersion("0.3.0")
+version = calculateVersion("0.3.1")
 
 println("Version: $version")
 
