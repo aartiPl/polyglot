@@ -1,5 +1,7 @@
 package net.igsoft.polyglot.core
 
+import kotlin.jvm.JvmInline
+
 @JvmInline
 value class MsgLocale private constructor(
     val languageTag: String,

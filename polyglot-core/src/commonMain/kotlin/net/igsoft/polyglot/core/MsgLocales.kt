@@ -13,4 +13,3 @@ object MsgLocales {
     val PL_PL: MsgLocale
         get() = MsgLocale.of("pl-PL")
 }
-

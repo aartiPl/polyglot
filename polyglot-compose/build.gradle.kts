@@ -1,5 +1,6 @@
 plugins {
     kotlin("multiplatform")
+    id("com.android.kotlin.multiplatform.library")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.adarshr.test-logger")
     id("com.vanniktech.maven.publish")
@@ -7,6 +8,19 @@ plugins {
 
 kotlin {
     jvm()
+    android {
+        namespace = "net.igsoft.polyglot.compose"
+        compileSdk = 37
+        minSdk = 23
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+        androidResources {
+            enable = true
+        }
+    }
+    iosArm64()
+    iosSimulatorArm64()
     jvmToolchain(17)
 
     sourceSets {

@@ -1,14 +1,29 @@
 plugins {
     kotlin("multiplatform")
+    id("com.android.kotlin.multiplatform.library")
     id("com.adarshr.test-logger")
     id("com.vanniktech.maven.publish")
 }
 
 kotlin {
     jvm()
+    android {
+        namespace = "net.igsoft.polyglot.core"
+        compileSdk = 37
+        minSdk = 23
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+    }
+    iosArm64()
+    iosSimulatorArm64()
     jvmToolchain(17)
 
     sourceSets {
+        commonMain.dependencies {
+            implementation("org.jetbrains.kotlinx:atomicfu:0.33.0")
+        }
+
         commonTest.dependencies {
             implementation(kotlin("test"))
             implementation("com.willowtreeapps.assertk:assertk:0.28.1")

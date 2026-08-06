@@ -2,9 +2,10 @@ import org.gradle.api.tasks.testing.Test
 
 plugins {
     kotlin("multiplatform") version "2.4.0" apply false
-    id("org.jetbrains.kotlin.plugin.compose") version "2.4.0" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.4.10" apply false
+    id("com.android.kotlin.multiplatform.library") version "9.1.1" apply false
     id("com.adarshr.test-logger") version "4.0.0" apply false
-    id("com.vanniktech.maven.publish") version "0.36.0" apply false
+    id("com.vanniktech.maven.publish") version "0.37.0" apply false
     idea
 }
 
@@ -29,7 +30,7 @@ fun calculateVersion(baseVersion: String): String {
 }
 
 group = "net.igsoft.polyglot"
-version = calculateVersion("0.2.0")
+version = calculateVersion("0.3.0")
 
 println("Version: $version")
 
