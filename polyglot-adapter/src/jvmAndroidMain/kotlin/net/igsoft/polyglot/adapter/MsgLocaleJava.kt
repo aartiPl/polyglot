@@ -1,6 +1,7 @@
-package net.igsoft.polyglot.core
+package net.igsoft.polyglot.adapter
 
 import java.util.Locale
+import net.igsoft.polyglot.core.MsgLocale
 
 fun MsgLocale.Companion.of(locale: Locale): MsgLocale = MsgLocale.of(locale.toLanguageTag())
 

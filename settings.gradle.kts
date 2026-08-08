@@ -18,4 +18,5 @@ dependencyResolutionManagement {
 rootProject.name = "polyglot"
 
 include(":polyglot-core")
+include(":polyglot-adapter")
 include(":polyglot-compose")
