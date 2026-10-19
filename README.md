@@ -234,6 +234,11 @@ val traditionalChineseTaiwan = MsgLocales.ZH_HANT_TW
 - `add(instance)` registers one translation object under its Kotlin type,
 - `add(instance, clazz)` lets you register it explicitly under a selected type.
 
+Create fresh models inside `register()` and register the same translation types on each invocation.
+The registry retains the bundle and calls `register()` again when its released models are requested.
+Keep model instances local to `register()` so the bundle does not retain released translations.
+Register mappers and nested aggregates outside locale bundles.
+
 This makes bundles a good fit for leaf-level module translations.
 
 ### `MsgAggregate`
@@ -244,6 +249,8 @@ This makes bundles a good fit for leaf-level module translations.
 - it can register other aggregates,
 - it does not represent one locale by itself,
 - it is the main tool for building module-level and app-level translation trees.
+
+The protected `registry` property is available only while `register()` is executing.
 
 ### `MsgMapper`
 
@@ -423,6 +430,7 @@ Key behaviors:
 - accepts top-level aggregates in the constructor,
 - supports incremental registration through `registerBundle(...)`,
 - keeps locale bundles pending and registers them lazily on first use,
+- retains each effective bundle translation's owner so released models can be rebuilt without changing registration precedence,
 - builds translation bases before applying global and localized application overrides,
 - resolves exact locale first and then walks fallback locales such as `pl-PL -> pl`,
 - keeps track of known locales through `registeredLocales()`.
@@ -448,8 +456,14 @@ Behavior:
 - default fallback locale is English,
 - final results are cached by requested locale and translation type,
 - registry changes invalidate cached results on the next lookup, including changes to mapper sources,
-- changing the current locale with `setCurrentLocale(...)` clears the cache,
+- changing the current locale with `setCurrentLocale(...)` clears this resolver's cache and releases all bundle model instances held by the registry, including mapper sources,
+- the next lookup rebuilds each required bundle once; subsequent lookups reuse its models,
+- setting the already active locale preserves the cache and bundle models,
 - missing translations throw a detailed error including the locale chain and requested type.
+
+Releasing bundle models preserves translation definitions, mapper definitions and directly registered factories.
+Other resolvers sharing the registry retain their cached results until their own cache is invalidated.
+Models still referenced by application code or another resolver remain reachable; GC can reclaim them after those references are released.
 
 ## Example: command line application
 

@@ -33,8 +33,12 @@ class PolyglotResolver(private val registry: PolyglotRegistry) {
     }
 
     fun setCurrentLocale(locale: MsgLocale) {
+        if (currentLocale == locale) {
+            return
+        }
         currentLocale = locale
         translationMap.clear()
+        registry.releaseBundleTranslations()
     }
 
     fun registeredLocales(): Set<MsgLocale> = registry.registeredLocales()

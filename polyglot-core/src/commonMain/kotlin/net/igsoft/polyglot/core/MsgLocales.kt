@@ -1,7 +1,6 @@
-@file:Suppress("unused")
-
 package net.igsoft.polyglot.core
 
+@Suppress("unused")
 object MsgLocales {
     val AF = MsgLocale.of("af")
     val AF_ZA = MsgLocale.of("af-ZA")

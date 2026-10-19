@@ -10,6 +10,6 @@ abstract class MsgBundle : MsgAggregate() {
     }
 
     fun <T : Any> add(instance: T, clazz: KClass<T>) {
-        registry.registerTranslationClass(locale, clazz) { instance }
+        registry.registerBundleTranslation(this, clazz, instance)
     }
 }
