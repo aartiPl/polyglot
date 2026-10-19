@@ -17,6 +17,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "polyglot"
 
-include(":polyglot-core")
-include(":polyglot-adapter")
-include(":polyglot-compose")
+include(":polyglot-locale")
+include(":polyglot-translation")
+include(":polyglot-translation-compose")

@@ -2,7 +2,7 @@
 
 `polyglot` is a small Kotlin localization library focused on strongly typed translations, explicit locale handling and simple integration with or without UI frameworks.
 
-The project is built as Kotlin Multiplatform. The core API is available from `commonMain`, and JVM-specific locale interop is provided separately for JVM consumers.
+The project is built as Kotlin Multiplatform for JVM, Android and iOS. Locale and translation APIs are available from `commonMain`. Java locale conversions are included in the JVM and Android variants of `polyglot-locale`.
 
 ## Why use it
 
@@ -12,17 +12,24 @@ The project is built as Kotlin Multiplatform. The core API is available from `co
 - Fallback handling for language and regional locales.
 - Mapper support for deriving one translation model from another.
 - Usable in Compose applications, backend services, desktop tools and command line applications.
-- No dependency on a typical UI stack in `polyglot-core`.
+- No dependency on a typical UI stack in `polyglot-translation`.
 - Hierarchical translation composition from leaf modules up to the application root.
 
-One of the main advantages of the library is that the core module works equally well in simple command line applications and in full UI applications. You can keep one localization model across both environments and add UI integration only where it is actually needed.
+The translation module works in command line applications and UI applications. Keep one localization model across both environments and add UI integration where it is needed.
 
-Another important advantage is the ownership model. A feature can define and keep its own translation classes and bundles locally, and the application can later assemble them into one resolver through aggregate trees. That keeps translations close to the code that actually uses them instead of forcing one global file or one central registry with unrelated strings mixed together.
+Another important advantage is the ownership model. A feature can define and keep its own translation classes and bundles locally, and the application can later assemble them into one resolver through module trees. That keeps translations close to the code that actually uses them instead of forcing one global file or one central registry with unrelated strings mixed together.
 
 ## Modules
 
-- `polyglot-core`: translation registry, bundles, mappers, locale model and resolver.
-- `polyglot-compose`: Compose integration built on top of `polyglot-core`.
+| Gradle module and Maven artifact | Main package | Responsibility |
+| --- | --- | --- |
+| `polyglot-locale` | `net.igsoft.polyglot.locale` | Locale values, predefined tags, normalization and Java locale conversions. |
+| `polyglot-translation` | `net.igsoft.polyglot.translation` | Translation definitions, bundles, modules, mapper rules, registry and resolver. |
+| `polyglot-translation-compose` | `net.igsoft.polyglot.translation.compose` | Translation providers and lookups for Compose. |
+
+Dependencies are `polyglot-translation-compose` → `polyglot-translation` → `polyglot-locale`.
+Each dependency is exposed through `api`, so consumers add only the artifact they need.
+Use `polyglot-locale` independently for locale handling without translation or Compose dependencies.
 
 ## Installation
 
@@ -36,9 +43,19 @@ repositories {
 
 Add the dependency you need:
 
+For standalone locale handling:
+
 ```kotlin
 dependencies {
-    implementation("net.igsoft.polyglot:polyglot-core:<version>")
+    implementation("net.igsoft.polyglot:polyglot-locale:<version>")
+}
+```
+
+For typed translations:
+
+```kotlin
+dependencies {
+    implementation("net.igsoft.polyglot:polyglot-translation:<version>")
 }
 ```
 
@@ -46,27 +63,27 @@ For Jetpack Compose or Compose Multiplatform integration:
 
 ```kotlin
 dependencies {
-    implementation("net.igsoft.polyglot:polyglot-compose:<version>")
+    implementation("net.igsoft.polyglot:polyglot-translation-compose:<version>")
 }
 ```
 
 ## Core concepts
 
-`polyglot-core` is built around a few small concepts:
+`polyglot-locale` provides `Locale` and `Locales`. The remaining types belong to `polyglot-translation`:
 
-- `MsgLocale`: normalized locale value object based on language tags.
-- `MsgLocales`: predefined language, regional and script locales such as `EN`, `EN_US`, `PT_BR` and `ZH_HANT_TW`.
-- `MsgDefinition`: common type for bundles and aggregates accepted by the registry.
-- `MsgBundle`: translations for one locale.
-- `MsgTranslations`: local collector of the models created by a bundle.
-- `MsgRegistration`: local collector of definitions and mapper rules declared by an aggregate.
-- `MsgAggregate`: hierarchical grouping of bundles, nested aggregates and mapper rules.
-- `PolyglotRegistry`: registration and resolution backend.
-- `PolyglotResolver`: application-facing translation resolver with locale-aware caching.
+- `Locale`: normalized locale value object based on language tags.
+- `Locales`: predefined language, regional and script locales such as `EN`, `EN_US`, `PT_BR` and `ZH_HANT_TW`.
+- `Definition`: common type for bundles and modules accepted by the registry.
+- `Bundle`: translations for one locale.
+- `BundleScope`: local collector of the models created by a bundle.
+- `ModuleScope`: local collector of definitions and mapper rules declared by a module.
+- `Module`: hierarchical grouping of bundles, nested modules and mapper rules.
+- `Registry`: registration and resolution backend.
+- `Resolver`: application-facing translation resolver with locale-aware caching.
 
 The library resolves translation objects by Kotlin type, not by string key.
 
-## Using `polyglot-core`
+## Using `polyglot-translation`
 
 Define your translation models as regular Kotlin classes:
 
@@ -80,15 +97,15 @@ data class GreetingStrings(
 Register locale bundles:
 
 ```kotlin
-import net.igsoft.polyglot.core.MsgBundle
-import net.igsoft.polyglot.core.MsgLocale
-import net.igsoft.polyglot.core.MsgLocales
-import net.igsoft.polyglot.core.MsgTranslations
+import net.igsoft.polyglot.locale.Locale
+import net.igsoft.polyglot.locale.Locales
+import net.igsoft.polyglot.translation.Bundle
+import net.igsoft.polyglot.translation.BundleScope
 
-class GreetingBundleEn : MsgBundle() {
-    override val locale: MsgLocale = MsgLocales.EN
+class GreetingBundleEn : Bundle() {
+    override val locale: Locale = Locales.EN
 
-    override fun register(translations: MsgTranslations) {
+    override fun register(translations: BundleScope) {
         translations.add(
             GreetingStrings(
                 hello = "Hello",
@@ -99,14 +116,14 @@ class GreetingBundleEn : MsgBundle() {
 }
 ```
 
-Resolve translations through `PolyglotResolver`:
+Resolve translations through `Resolver`:
 
 ```kotlin
-import net.igsoft.polyglot.core.PolyglotRegistry
-import net.igsoft.polyglot.core.PolyglotResolver
+import net.igsoft.polyglot.translation.Registry
+import net.igsoft.polyglot.translation.Resolver
 
-val resolver = PolyglotResolver(
-    PolyglotRegistry(
+val resolver = Resolver(
+    Registry(
         listOf(GreetingBundleEn())
     )
 )
@@ -123,24 +140,33 @@ The intended way to organize translations is hierarchical and local-first:
 
 - define translation classes near the module or feature that owns them,
 - define locale bundles near that module,
-- group related bundles in a local `MsgAggregate`,
-- compose higher-level aggregates until the application root,
-- create one `PolyglotRegistry` from top-level aggregates.
+- group related bundles in a local `Module`,
+- compose higher-level modules until the application root,
+- create one `Registry` from top-level modules.
 
 This is especially useful in larger applications because it avoids one giant translation file or one giant registration object.
 
 Example:
 
 ```kotlin
+import net.igsoft.polyglot.locale.Locale
+import net.igsoft.polyglot.locale.Locales
+import net.igsoft.polyglot.translation.Bundle
+import net.igsoft.polyglot.translation.BundleScope
+import net.igsoft.polyglot.translation.Module
+import net.igsoft.polyglot.translation.ModuleScope
+import net.igsoft.polyglot.translation.Registry
+import net.igsoft.polyglot.translation.Resolver
+
 data class SearchStrings(
     val placeholder: String,
     val clear: String,
 )
 
-class SearchBundleEn : MsgBundle() {
-    override val locale: MsgLocale = MsgLocales.EN
+class SearchBundleEn : Bundle() {
+    override val locale: Locale = Locales.EN
 
-    override fun register(translations: MsgTranslations) {
+    override fun register(translations: BundleScope) {
         translations.add(
             SearchStrings(
                 placeholder = "Search",
@@ -150,10 +176,10 @@ class SearchBundleEn : MsgBundle() {
     }
 }
 
-class SearchBundlePl : MsgBundle() {
-    override val locale: MsgLocale = MsgLocales.PL
+class SearchBundlePl : Bundle() {
+    override val locale: Locale = Locales.PL
 
-    override fun register(translations: MsgTranslations) {
+    override fun register(translations: BundleScope) {
         translations.add(
             SearchStrings(
                 placeholder = "Szukaj",
@@ -163,22 +189,22 @@ class SearchBundlePl : MsgBundle() {
     }
 }
 
-class SearchAggregate : MsgAggregate() {
-    override fun register(registration: MsgRegistration) {
+class SearchModule : Module() {
+    override fun register(registration: ModuleScope) {
         registration.registerBundle(SearchBundleEn())
         registration.registerBundle(SearchBundlePl())
     }
 }
 
-class AppAggregate : MsgAggregate() {
-    override fun register(registration: MsgRegistration) {
-        registration.registerBundle(SearchAggregate())
+class AppModule : Module() {
+    override fun register(registration: ModuleScope) {
+        registration.registerBundle(SearchModule())
     }
 }
 
-val resolver = PolyglotResolver(
-    PolyglotRegistry(
-        listOf(AppAggregate())
+val resolver = Resolver(
+    Registry(
+        listOf(AppModule())
     )
 )
 ```
@@ -187,12 +213,12 @@ That pattern scales from a tiny CLI tool to a large modular app.
 
 ## Detailed API behavior
 
-### `MsgLocale`
+### `Locale`
 
-Use `MsgLocale.of(...)` to create normalized locales from a language tag string:
+Use `Locale.of(...)` to create normalized locales from a language tag string:
 
 ```kotlin
-val localeA = MsgLocale.of("pl-PL")
+val localeA = Locale.of("pl-PL")
 ```
 
 Behavior:
@@ -203,38 +229,42 @@ Behavior:
 - accepts well-formed non-standard tags,
 - exposes the normalized tag through `languageTag`.
 
-JVM interop helpers:
+Java locale interop is included in `polyglot-locale` on JVM and Android. Import the conversion extensions and use an alias to distinguish Java's `Locale`:
 
 ```kotlin
-import java.util.Locale
+import net.igsoft.polyglot.locale.Locale
+import net.igsoft.polyglot.locale.of
+import net.igsoft.polyglot.locale.toJavaLocale
+import net.igsoft.polyglot.locale.toLocale
+import java.util.Locale as JavaLocale
 
-val localeB = MsgLocale.of(Locale.US)
-val msgLocale = Locale.GERMANY.toMsgLocale()
-val javaLocale = msgLocale.toJavaLocale()
+val localeB = Locale.of(JavaLocale.US)
+val locale = JavaLocale.GERMANY.toLocale()
+val javaLocale = locale.toJavaLocale()
 ```
 
-### `MsgLocales`
+### `Locales`
 
 Use predefined values for common languages, regions and scripts:
 
 ```kotlin
-val portuguese = MsgLocales.PT
-val brazilianPortuguese = MsgLocales.PT_BR
-val traditionalChineseTaiwan = MsgLocales.ZH_HANT_TW
+val portuguese = Locales.PT
+val brazilianPortuguese = Locales.PT_BR
+val traditionalChineseTaiwan = Locales.ZH_HANT_TW
 ```
 
-- values are initialized once when `MsgLocales` is first used; subsequent reads reuse the normalized tags,
+- values are initialized once when `Locales` is first used; subsequent reads reuse the normalized tags,
 - language, region and script values remain distinct: `PT`, `PT_PT` and `PT_BR` represent different locales,
-- predefined values and `MsgLocale.of(...)` compare by normalized tag and work interchangeably as registry and cache keys,
+- predefined values and `Locale.of(...)` compare by normalized tag and work interchangeably as registry and cache keys,
 - predefined values do not register translations or add entries to `registeredLocales()`,
-- use `MsgLocale.of(...)` for tags outside the predefined catalog.
+- use `Locale.of(...)` for tags outside the predefined catalog.
 
-### `MsgBundle`
+### `Bundle`
 
-`MsgBundle` defines translations for a single locale.
+`Bundle` defines translations for a single locale.
 
 - one bundle instance has exactly one `locale`,
-- implement `register(translations: MsgTranslations)` to collect the bundle's models,
+- implement `register(translations: BundleScope)` to collect the bundle's models,
 - `translations.add(instance)` registers one translation object under its Kotlin type,
 - `translations.add<T>(instance)` registers a model under an explicitly selected type,
 - `translations.add(instance, clazz)` lets you register it explicitly under a selected type.
@@ -246,25 +276,25 @@ Keep models and the collector local to the invocation so the bundle does not ret
 
 This makes bundles a good fit for leaf-level module translations.
 
-### `MsgAggregate`
+### `Module`
 
-`MsgAggregate` is the mechanism for hierarchical composition.
+`Module` is the mechanism for hierarchical composition.
 
 - it can register bundles,
-- it can register other aggregates,
+- it can register other modules,
 - it can declare base conversions, regional inheritance and application overrides,
 - it does not represent one locale by itself,
 - it is the main tool for building module-level and app-level translation trees.
 
-Implement `register(registration: MsgRegistration)` and add definitions with `registration.registerBundle(...)`.
-Bundles and aggregates implement `MsgDefinition`; use this type for mixed collections of definitions.
-The registry applies the collected declarations after the entire aggregate tree registers successfully and mapper duplicates are validated.
+Implement `register(registration: ModuleScope)` and add definitions with `registration.registerBundle(...)`.
+Bundles and modules implement `Definition`; use this type for mixed collections of definitions.
+The registry applies the collected declarations after the entire module tree registers successfully and mapper duplicates are validated.
 Bundle models remain lazy. Keep the collector local to `register()`; later additions do not update the registry.
 
 ### Mapper rules
 
 Declare base conversions `(S) -> T` and application overrides `(S, T) -> T` through
-`MsgRegistration.registerMapper(...)` inside `MsgAggregate.register()`.
+`ModuleScope.registerMapper(...)` inside `Module.register()`.
 
 | Operation | Declaration | Use |
 | --- | --- | --- |
@@ -272,7 +302,7 @@ Declare base conversions `(S) -> T` and application overrides `(S, T) -> T` thro
 | Regional inheritance | `registration.registerMapper<T>(locale = ..., sourceLocale = ...) { base -> ... }` | Build a regional base by copying selected fields from another locale. |
 | Application override | `registration.registerMapper<S, T> { source, target -> ... }` | Copy selected fields into an existing `T`, preserving its other translations. |
 
-Both `MsgRegistration` and `PolyglotRegistry` provide these generic overloads and equivalent overloads accepting `KClass` values.
+Both `ModuleScope` and `Registry` provide these generic overloads and equivalent overloads accepting `KClass` values.
 
 The locale parameters have separate roles:
 
@@ -292,8 +322,8 @@ data class SearchFieldStrings(
     val back: String,
 )
 
-class SearchFieldMapper : MsgAggregate() {
-    override fun register(registration: MsgRegistration) {
+class SearchFieldMapper : Module() {
+    override fun register(registration: ModuleScope) {
         registration.registerMapper<CommonStrings, SearchFieldStrings> { strings ->
             SearchFieldStrings(
                 clear = strings.clear,
@@ -325,10 +355,10 @@ data class AccountStrings(
     val cancel: String,
 )
 
-class AccountBundlePt : MsgBundle() {
-    override val locale = MsgLocales.PT
+class AccountBundlePt : Bundle() {
+    override val locale = Locales.PT
 
-    override fun register(translations: MsgTranslations) {
+    override fun register(translations: BundleScope) {
         translations.add(
             AccountStrings(
                 phone = "Telemóvel",
@@ -339,11 +369,11 @@ class AccountBundlePt : MsgBundle() {
     }
 }
 
-class AccountMapper : MsgAggregate() {
-    override fun register(registration: MsgRegistration) {
+class AccountMapper : Module() {
+    override fun register(registration: ModuleScope) {
         registration.registerMapper<AccountStrings>(
-            locale = MsgLocales.PT_BR,
-            sourceLocale = MsgLocales.PT,
+            locale = Locales.PT_BR,
+            sourceLocale = Locales.PT,
         ) {
             it.copy(
                 phone = "Celular",
@@ -353,14 +383,14 @@ class AccountMapper : MsgAggregate() {
     }
 }
 
-val resolver = PolyglotResolver(
-    PolyglotRegistry(listOf(AccountBundlePt(), AccountMapper()))
+val resolver = Resolver(
+    Registry(listOf(AccountBundlePt(), AccountMapper()))
 )
-val strings = resolver.getTranslationClass<AccountStrings>(MsgLocales.PT_BR)
+val strings = resolver.getTranslationClass<AccountStrings>(Locales.PT_BR)
 // AccountStrings(phone=Celular, save=Salvar, cancel=Cancelar)
 ```
 
-Here, `locale = MsgLocales.PT_BR` selects the regional target and `sourceLocale = MsgLocales.PT` selects its base.
+Here, `locale = Locales.PT_BR` selects the regional target and `sourceLocale = Locales.PT` selects its base.
 Specify both for same-type regional inheritance so the mapper reads the base locale explicitly.
 
 Use a two-argument mapper to override selected fields of an existing component translation.
@@ -372,24 +402,24 @@ data class CommonActionStrings(
     val save: String,
 )
 
-class CommonActionBundlePt : MsgBundle() {
-    override val locale = MsgLocales.PT
+class CommonActionBundlePt : Bundle() {
+    override val locale = Locales.PT
 
-    override fun register(translations: MsgTranslations) {
+    override fun register(translations: BundleScope) {
         translations.add(CommonActionStrings(save = "OK"))
     }
 }
 
-class AccountApplicationMapper : MsgAggregate() {
-    override fun register(registration: MsgRegistration) {
+class AccountApplicationMapper : Module() {
+    override fun register(registration: ModuleScope) {
         registration.registerMapper<CommonActionStrings, AccountStrings> { common, account ->
             account.copy(save = common.save)
         }
     }
 }
 
-val applicationResolver = PolyglotResolver(
-    PolyglotRegistry(
+val applicationResolver = Resolver(
+    Registry(
         listOf(
             AccountBundlePt(),
             AccountMapper(),
@@ -398,7 +428,7 @@ val applicationResolver = PolyglotResolver(
         )
     )
 )
-val applicationStrings = applicationResolver.getTranslationClass<AccountStrings>(MsgLocales.PT_BR)
+val applicationStrings = applicationResolver.getTranslationClass<AccountStrings>(Locales.PT_BR)
 // AccountStrings(phone=Celular, save=OK, cancel=Cancelar)
 ```
 
@@ -406,11 +436,11 @@ The component's `pt-BR` base supplies `Celular` and `Salvar`. The application ov
 independently through `pt-BR -> pt -> en`, finds `OK` in `pt` and changes only `save`.
 The regional phone label and inherited cancel label retain their values.
 
-To limit an application override to `pt-BR`, specify only `locale` inside `MsgAggregate.register()`:
+To limit an application override to `pt-BR`, specify only `locale` inside `Module.register()`:
 
 ```kotlin
 registration.registerMapper<CommonActionStrings, AccountStrings>(
-    locale = MsgLocales.PT_BR,
+    locale = Locales.PT_BR,
 ) { common, account ->
     account.copy(save = common.save)
 }
@@ -435,13 +465,13 @@ Source bundles are registered lazily, including sources outside the requested lo
 Keep transformations immutable, for example with `copy()`, so the base translation remains unchanged.
 Localized mapper target locales are included in `registeredLocales()`.
 
-### `PolyglotRegistry`
+### `Registry`
 
-`PolyglotRegistry` stores bundles and mappers and resolves translation classes internally.
+`Registry` stores bundles and mappers and resolves translation classes internally.
 
 Key behaviors:
 
-- accepts top-level `MsgDefinition` values in the constructor,
+- accepts top-level `Definition` values in the constructor,
 - supports incremental registration through `registerBundle(...)`,
 - supports direct factories through `registerTranslationClass<T>(locale) { ... }` or the overload accepting `KClass<T>`,
 - keeps locale bundles pending and registers them lazily on first use,
@@ -450,17 +480,17 @@ Key behaviors:
 - resolves exact locale first and then walks fallback locales such as `pl-PL -> pl`,
 - keeps track of known locales through `registeredLocales()`.
 
-### `PolyglotResolver`
+### `Resolver`
 
-`PolyglotResolver` is the main entry point used by applications.
+`Resolver` is the main entry point used by applications.
 
 ```kotlin
-val resolver = PolyglotResolver(PolyglotRegistry(listOf(AppAggregate())))
+val resolver = Resolver(Registry(listOf(AppModule())))
 
-resolver.setCurrentLocale(MsgLocales.PL)
+resolver.setCurrentLocale(Locales.PL)
 
 val stringsA = resolver.getTranslationClass<SearchStrings>()
-val stringsB = resolver.getTranslationClass<SearchStrings>(MsgLocales.EN_US)
+val stringsB = resolver.getTranslationClass<SearchStrings>(Locales.EN_US)
 val locales = resolver.registeredLocales()
 ```
 
@@ -483,17 +513,17 @@ Models still referenced by application code or another resolver remain reachable
 
 ## Example: command line application
 
-Because `polyglot-core` has no UI dependency, it can be used directly in small console tools:
+Because `polyglot-translation` has no UI dependency, it can be used directly in small console tools:
 
 ```kotlin
 fun main() {
-    val resolver = PolyglotResolver(
-        PolyglotRegistry(
-            listOf(AppAggregate())
+    val resolver = Resolver(
+        Registry(
+            listOf(AppModule())
         )
     )
 
-    resolver.setCurrentLocale(MsgLocale.of("pl-PL"))
+    resolver.setCurrentLocale(Locale.of("pl-PL"))
 
     val strings = resolver.getTranslationClass<SearchStrings>()
     println(strings.placeholder)
@@ -502,21 +532,21 @@ fun main() {
 
 This is one of the main strengths of the library: the same translation model can be reused in CLI tools, background jobs, backend services and UI applications.
 
-## Using `polyglot-compose`
+## Using `polyglot-translation-compose`
 
 Wrap your UI with `AppLocalizationProvider` and resolve typed translations with `rememberTranslations()`:
 
 ```kotlin
 import androidx.compose.runtime.Composable
-import net.igsoft.polyglot.core.PolyglotRegistry
-import net.igsoft.polyglot.core.PolyglotResolver
-import net.igsoft.polyglot.compose.AppLocalizationProvider
-import net.igsoft.polyglot.compose.rememberTranslations
+import net.igsoft.polyglot.translation.Registry
+import net.igsoft.polyglot.translation.Resolver
+import net.igsoft.polyglot.translation.compose.AppLocalizationProvider
+import net.igsoft.polyglot.translation.compose.rememberTranslations
 
 @Composable
 fun App() {
-    val resolver = PolyglotResolver(
-        PolyglotRegistry(
+    val resolver = Resolver(
+        Registry(
             listOf(GreetingBundleEn())
         )
     )
@@ -534,11 +564,11 @@ Compose API:
 - `rememberTranslations<MyStrings>()` resolves typed translations from the current composition,
 - `rememberTranslations<MyStrings>(polyglotResolver)` uses an explicit resolver and the composition locale; both forms also accept `KClass<MyStrings>`,
 - translation lookups use `LocalLocale` explicitly and reuse the resolver's revision-aware cache,
-- `LocalLocale` exposes the active `MsgLocale`,
-- `LocalSetLocale` lets the UI switch locale with `MsgLocale`,
+- `LocalLocale` exposes the active `Locale`,
+- `LocalSetLocale` lets the UI switch locale with `Locale`,
 - `LocalPolyglotResolver` exposes the resolver to nested composables.
 
-This keeps the UI integration thin. Locale state lives in Compose, but translation ownership and registration still stay in `polyglot-core`.
+This keeps the UI integration thin. Locale state lives in Compose, but translation ownership and registration still stay in `polyglot-translation`.
 After incremental registration, recompose the consuming content to display the updated translations.
 
 ## Build
