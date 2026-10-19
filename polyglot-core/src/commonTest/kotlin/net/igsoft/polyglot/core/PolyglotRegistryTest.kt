@@ -2,7 +2,9 @@ package net.igsoft.polyglot.core
 
 import assertk.assertThat
 import assertk.assertions.isEqualTo
+import assertk.assertions.messageContains
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 
 class PolyglotRegistryTest {
 
@@ -97,6 +99,230 @@ class PolyglotRegistryTest {
                 MsgLocales.EN_US,
             )
         )
+    }
+
+    @Test
+    fun `Given localized and global mappers when resolving translation then localized mapper wins regardless of registration order`() {
+        // Given
+        val localizedMapper = object : MsgMapper() {
+            override fun register() {
+                add<RegistryCommonStrings, RegistryTargetStrings>(
+                    locale = MsgLocales.EN,
+                    sourceLocale = MsgLocales.PL,
+                ) { strings ->
+                    RegistryTargetStrings(strings.clear, strings.back)
+                }
+            }
+        }
+        val aggregates = listOf(
+            RegistryCommonBundleEn(),
+            RegistryCommonBundlePl(),
+            RegistryTargetBundleEn(),
+            RegistryTargetMapper(),
+            localizedMapper,
+        )
+
+        listOf(aggregates, aggregates.reversed()).forEach { registrationOrder ->
+            val registry = PolyglotRegistry(registrationOrder)
+
+            // When
+            val translation = registry.getTranslationClass(RegistryTargetStrings::class, listOf(MsgLocales.EN))
+
+            // Then
+            assertThat(translation.clear).isEqualTo("Wyczyść")
+            assertThat(translation.back).isEqualTo("Wróć")
+        }
+    }
+
+    @Test
+    fun `Given mappers for multiple locales when resolving translations then retain each localized mapper`() {
+        // Given
+        val registry = PolyglotRegistry(listOf(RegistryBundleEn(), RegistryBundlePl()))
+        registry.registerMapper(
+            sourceClass = RegistryStrings::class,
+            targetClass = RegistryStrings::class,
+            locale = MsgLocales.EN_US,
+            sourceLocale = MsgLocales.EN,
+        ) { it.copy(label = "US ${it.label}") }
+        registry.registerMapper(
+            sourceClass = RegistryStrings::class,
+            targetClass = RegistryStrings::class,
+            locale = MsgLocales.PL_PL,
+            sourceLocale = MsgLocales.PL,
+        ) { it.copy(label = "PL ${it.label}") }
+
+        // When
+        val english = registry.getTranslationClass(RegistryStrings::class, listOf(MsgLocales.EN_US))
+        val polish = registry.getTranslationClass(RegistryStrings::class, listOf(MsgLocales.PL_PL))
+
+        // Then
+        assertThat(english.label).isEqualTo("US English")
+        assertThat(polish.label).isEqualTo("PL Polish")
+    }
+
+    @Test
+    fun `Given localized mapper without source when resolving translation then use global mapper`() {
+        // Given
+        val registry = PolyglotRegistry(listOf(RegistryCommonBundleEn(), RegistryTargetMapper()))
+        registry.registerMapper(
+            sourceClass = RegistryCommonStrings::class,
+            targetClass = RegistryTargetStrings::class,
+            locale = MsgLocales.EN,
+            sourceLocale = MsgLocales.PL,
+        ) { RegistryTargetStrings("Unavailable", "Unavailable") }
+
+        // When
+        val translation = registry.getTranslationClass(RegistryTargetStrings::class, listOf(MsgLocales.EN))
+
+        // Then
+        assertThat(translation.clear).isEqualTo("Clear")
+        assertThat(translation.back).isEqualTo("Back")
+    }
+
+    @Test
+    fun `Given localized mapper without source when resolving translation then use direct translation`() {
+        // Given
+        val registry = PolyglotRegistry(listOf(RegistryTargetBundleEn()))
+        registry.registerMapper(
+            sourceClass = RegistryCommonStrings::class,
+            targetClass = RegistryTargetStrings::class,
+            locale = MsgLocales.EN,
+            sourceLocale = MsgLocales.PL,
+        ) { RegistryTargetStrings("Unavailable", "Unavailable") }
+
+        // When
+        val translation = registry.getTranslationClass(RegistryTargetStrings::class, listOf(MsgLocales.EN))
+
+        // Then
+        assertThat(translation.clear).isEqualTo("Dismiss")
+        assertThat(translation.back).isEqualTo("Navigate up")
+    }
+
+    @Test
+    fun `Given localized mapper without source when resolving regional translation then use language fallback`() {
+        // Given
+        val registry = PolyglotRegistry(listOf(RegistryBundleEn()))
+        registry.registerMapper(
+            sourceClass = RegistryStrings::class,
+            targetClass = RegistryStrings::class,
+            locale = MsgLocales.EN_US,
+            sourceLocale = MsgLocales.PL,
+        ) { it.copy(label = "Unavailable") }
+
+        // When
+        val translation = registry.getTranslationClass(RegistryStrings::class, listOf(MsgLocales.EN_US))
+
+        // Then
+        assertThat(translation.label).isEqualTo("English")
+    }
+
+    @Test
+    fun `Given localized mapper with implicit source locale when resolving translation then use target locale source`() {
+        // Given
+        val registry = PolyglotRegistry(listOf(RegistryCommonBundleEn()))
+        registry.registerMapper(
+            sourceClass = RegistryCommonStrings::class,
+            targetClass = RegistryTargetStrings::class,
+            locale = MsgLocales.EN,
+        ) { RegistryTargetStrings(it.clear, it.back) }
+
+        // When
+        val translation = registry.getTranslationClass(RegistryTargetStrings::class, listOf(MsgLocales.EN))
+
+        // Then
+        assertThat(translation.clear).isEqualTo("Clear")
+        assertThat(translation.back).isEqualTo("Back")
+    }
+
+    @Test
+    fun `Given localized mapper when listing locales then include target locale without adding source locale`() {
+        // Given
+        val registry = PolyglotRegistry()
+        registry.registerMapper(
+            sourceClass = RegistryStrings::class,
+            targetClass = RegistryStrings::class,
+            locale = MsgLocales.EN_US,
+            sourceLocale = MsgLocales.PL,
+        ) { it }
+
+        // When
+        val locales = registry.registeredLocales()
+
+        // Then
+        assertThat(locales).isEqualTo(setOf(MsgLocales.EN_US))
+    }
+
+    @Test
+    fun `Given chained localized mappers when resolving translation then load source bundles outside requested fallback chain`() {
+        // Given
+        val counters = RegistryTranslationCounters()
+        val registry = PolyglotRegistry(listOf(RegistryLazyAggregate(counters)))
+        registry.registerMapper(
+            sourceClass = RegistryStrings::class,
+            targetClass = RegistryStrings::class,
+            locale = MsgLocales.EN_US,
+            sourceLocale = MsgLocales.PL_PL,
+        ) { it.copy(label = "US ${it.label}") }
+        registry.registerMapper(
+            sourceClass = RegistryStrings::class,
+            targetClass = RegistryStrings::class,
+            locale = MsgLocales.PL_PL,
+            sourceLocale = MsgLocales.PL,
+        ) { it.copy(label = "PL ${it.label}") }
+
+        // When
+        val translation = registry.getTranslationClass(RegistryStrings::class, listOf(MsgLocales.EN_US))
+
+        // Then
+        assertThat(translation.label).isEqualTo("US PL Polish")
+        assertThat(counters.polishBundleRegistrationCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `Given localized mapper based on global mapper when resolving translation then map the base before overriding`() {
+        // Given
+        val registry = PolyglotRegistry(listOf(RegistryCommonBundlePl(), RegistryTargetMapper()))
+        registry.registerMapper(
+            sourceClass = RegistryTargetStrings::class,
+            targetClass = RegistryTargetStrings::class,
+            locale = MsgLocales.PL_PL,
+            sourceLocale = MsgLocales.PL,
+        ) { it.copy(clear = "Regional") }
+
+        // When
+        val translation = registry.getTranslationClass(RegistryTargetStrings::class, listOf(MsgLocales.PL_PL))
+
+        // Then
+        assertThat(translation.clear).isEqualTo("Regional")
+        assertThat(translation.back).isEqualTo("Wróć")
+    }
+
+    @Test
+    fun `Given cyclic cross locale mappers when resolving translation then report dependency path`() {
+        // Given
+        val registry = PolyglotRegistry()
+        registry.registerMapper(
+            sourceClass = RegistryStrings::class,
+            targetClass = RegistryStrings::class,
+            locale = MsgLocales.EN_US,
+            sourceLocale = MsgLocales.PL_PL,
+        ) { it }
+        registry.registerMapper(
+            sourceClass = RegistryStrings::class,
+            targetClass = RegistryStrings::class,
+            locale = MsgLocales.PL_PL,
+            sourceLocale = MsgLocales.EN_US,
+        ) { it }
+
+        // When
+        val exception = assertFailsWith<IllegalStateException> {
+            registry.getTranslationClass(RegistryStrings::class, listOf(MsgLocales.EN_US))
+        }
+
+        // Then
+        assertThat(exception).messageContains("Cyclic translation dependency")
+        assertThat(exception).messageContains("RegistryStrings[en-US, BASE]")
+        assertThat(exception).messageContains("RegistryStrings[pl-PL, BASE]")
     }
 }
 

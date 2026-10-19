@@ -55,10 +55,10 @@ dependencies {
 `polyglot-core` is built around a few small concepts:
 
 - `MsgLocale`: normalized locale value object based on language tags.
-- `MsgLocales`: a few predefined locales such as `ENGLISH`, `US`, `POLISH` and `POLISH_POLAND`.
+- `MsgLocales`: predefined language, regional and script locales such as `EN`, `EN_US`, `PT_BR` and `ZH_HANT_TW`.
 - `MsgBundle`: translations for one locale.
 - `MsgAggregate`: hierarchical grouping of bundles and nested aggregates.
-- `MsgMapper`: mapping from one translation type to another.
+- `MsgMapper`: base conversions, regional inheritance and application overrides.
 - `PolyglotRegistry`: registration and resolution backend.
 - `PolyglotResolver`: application-facing translation resolver with locale-aware caching.
 
@@ -210,6 +210,22 @@ val msgLocale = Locale.GERMANY.toMsgLocale()
 val javaLocale = msgLocale.toJavaLocale()
 ```
 
+### `MsgLocales`
+
+Use predefined values for common languages, regions and scripts:
+
+```kotlin
+val portuguese = MsgLocales.PT
+val brazilianPortuguese = MsgLocales.PT_BR
+val traditionalChineseTaiwan = MsgLocales.ZH_HANT_TW
+```
+
+- values are initialized once when `MsgLocales` is first used; subsequent reads reuse the normalized tags,
+- language, region and script values remain distinct: `PT`, `PT_PT` and `PT_BR` represent different locales,
+- predefined values and `MsgLocale.of(...)` compare by normalized tag and work interchangeably as registry and cache keys,
+- predefined values do not register translations or add entries to `registeredLocales()`,
+- use `MsgLocale.of(...)` for tags outside the predefined catalog.
+
 ### `MsgBundle`
 
 `MsgBundle` defines translations for a single locale.
@@ -231,7 +247,20 @@ This makes bundles a good fit for leaf-level module translations.
 
 ### `MsgMapper`
 
-`MsgMapper` lets you derive one translation model from another:
+`MsgMapper` supports base conversions `(S) -> T` and application overrides `(S, T) -> T`.
+
+| Operation | Declaration | Use |
+| --- | --- | --- |
+| Base conversion | `add<S, T> { source -> ... }` | Build a complete `T` from another model; a bundle for `T` is optional. |
+| Regional inheritance | `add<T>(locale = ..., sourceLocale = ...) { base -> ... }` | Build a regional base by copying selected fields from another locale. |
+| Application override | `add<S, T> { source, target -> ... }` | Copy selected fields into an existing `T`, preserving its other translations. |
+
+The locale parameters have separate roles:
+
+- `locale` selects the target locale where the mapper participates in resolution; omit it for a global mapper,
+- `sourceLocale` selects the exact locale from which to resolve the source translation; set it when the source must come from a specific locale.
+
+Use a base conversion to build a complete translation object from another model:
 
 ```kotlin
 data class CommonStrings(
@@ -258,12 +287,132 @@ class SearchFieldMapper : MsgMapper() {
 
 This is useful when one feature-specific translation model can be built from a shared common translation model.
 
-Behavior:
+Base conversion behavior:
 
-- the mapper is registered for a target type,
-- when a source translation is available for the resolved locale, the mapper is preferred,
-- direct bundle translations are used when the mapper can not resolve the target type,
-- cyclic mapper chains are stopped and reported as missing translations.
+- the mapper is registered for a target type and an optional target `locale`,
+- omit `locale` to register a global mapper,
+- `sourceLocale` selects the exact locale used to resolve the source; omit it to use the locale currently being resolved,
+- for each locale in the fallback chain, base resolution tries the localized mapper, global mapper and direct bundle translation in that order,
+- base conversions use source bases without application overrides,
+- when a mapper cannot resolve its source, resolution continues with the next candidate,
+- cycles fail with an error containing the dependency path.
+
+Use a mapper with the same source and target type to override selected fields for a regional locale:
+
+```kotlin
+data class AccountStrings(
+    val phone: String,
+    val save: String,
+    val cancel: String,
+)
+
+class AccountBundlePt : MsgBundle() {
+    override val locale = MsgLocales.PT
+
+    override fun register() {
+        add(
+            AccountStrings(
+                phone = "Telemóvel",
+                save = "Guardar",
+                cancel = "Cancelar",
+            )
+        )
+    }
+}
+
+class AccountMapper : MsgMapper() {
+    override fun register() {
+        add<AccountStrings>(
+            locale = MsgLocales.PT_BR,
+            sourceLocale = MsgLocales.PT,
+        ) {
+            it.copy(
+                phone = "Celular",
+                save = "Salvar",
+            )
+        }
+    }
+}
+
+val resolver = PolyglotResolver(
+    PolyglotRegistry(listOf(AccountBundlePt(), AccountMapper()))
+)
+val strings = resolver.getTranslationClass(AccountStrings::class, MsgLocales.PT_BR)
+// AccountStrings(phone=Celular, save=Salvar, cancel=Cancelar)
+```
+
+Here, `locale = MsgLocales.PT_BR` selects the regional target and `sourceLocale = MsgLocales.PT` selects its base.
+Specify both for same-type regional inheritance so the mapper reads the base locale explicitly.
+
+Use a two-argument mapper to override selected fields of an existing component translation.
+For an application-wide override, omit both locale parameters: the mapper applies globally and its source follows
+the original request's full fallback chain. Continuing the account example, register the shared save label for `pt`:
+
+```kotlin
+data class CommonActionStrings(
+    val save: String,
+)
+
+class CommonActionBundlePt : MsgBundle() {
+    override val locale = MsgLocales.PT
+
+    override fun register() {
+        add(CommonActionStrings(save = "OK"))
+    }
+}
+
+class AccountApplicationMapper : MsgMapper() {
+    override fun register() {
+        add<CommonActionStrings, AccountStrings> { common, account ->
+            account.copy(save = common.save)
+        }
+    }
+}
+
+val applicationResolver = PolyglotResolver(
+    PolyglotRegistry(
+        listOf(
+            AccountBundlePt(),
+            AccountMapper(),
+            CommonActionBundlePt(),
+            AccountApplicationMapper(),
+        )
+    )
+)
+val applicationStrings = applicationResolver.getTranslationClass(AccountStrings::class, MsgLocales.PT_BR)
+// AccountStrings(phone=Celular, save=OK, cancel=Cancelar)
+```
+
+The component's `pt-BR` base supplies `Celular` and `Salvar`. The application override resolves its source
+independently through `pt-BR -> pt -> en`, finds `OK` in `pt` and changes only `save`.
+The regional phone label and inherited cancel label retain their values.
+
+To limit an application override to `pt-BR`, specify only `locale` inside `MsgMapper.register()`:
+
+```kotlin
+add<CommonActionStrings, AccountStrings>(locale = MsgLocales.PT_BR) { common, account ->
+    account.copy(save = common.save)
+}
+```
+
+The override participates at `pt-BR` in the target fallback chain. Its source still resolves independently through
+the original request's full fallback chain. Leave `sourceLocale` omitted for this behavior; setting it to `PT`
+would select exactly `pt` even when `pt-BR` common strings are available.
+
+Application override behavior:
+
+- resolve the component base, including regional inheritance, before applying overrides,
+- resolve source translations independently, including their application overrides,
+- without `sourceLocale`, resolve the source through the original request's full locale chain, including the default locale,
+- with `sourceLocale`, resolve the source for that exact locale,
+- apply the global override, then the first applicable localized override in the request's fallback chain,
+- pass the global override's result to the localized override; apply each at most once per target resolution,
+- skip an override when its source is missing; a missing component base remains a missing translation error,
+- register at most one mapper per role (base or override), target type and locale; duplicate registrations fail.
+
+Source bundles are registered lazily, including sources outside the requested locale's fallback chain.
+Keep transformations immutable, for example with `copy()`, so the base translation remains unchanged.
+Localized mapper target locales are included in `registeredLocales()`.
 
 ### `PolyglotRegistry`
 
@@ -274,7 +423,7 @@ Key behaviors:
 - accepts top-level aggregates in the constructor,
 - supports incremental registration through `registerBundle(...)`,
 - keeps locale bundles pending and registers them lazily on first use,
-- prefers mapped translations over direct bundle translations when a mapper can resolve the target type,
+- builds translation bases before applying global and localized application overrides,
 - resolves exact locale first and then walks fallback locales such as `pl-PL -> pl`,
 - keeps track of known locales through `registeredLocales()`.
 
@@ -297,7 +446,8 @@ Behavior:
 - `getTranslationClass(clazz)` resolves using the current locale,
 - `getTranslationClass(clazz, locale)` resolves using an explicit locale,
 - default fallback locale is English,
-- results are cached by locale and translation type,
+- final results are cached by requested locale and translation type,
+- registry changes invalidate cached results on the next lookup, including changes to mapper sources,
 - changing the current locale with `setCurrentLocale(...)` clears the cache,
 - missing translations throw a detailed error including the locale chain and requested type.
 

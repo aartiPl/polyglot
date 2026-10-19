@@ -4,8 +4,12 @@ import kotlin.reflect.KClass
 
 class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
     private val registrations = mutableMapOf<MsgLocale, MutableMap<KClass<*>, () -> Any>>()
-    private val mapperRegistrations = mutableMapOf<KClass<*>, MapperRegistration>()
+    private val mapperRegistrations = mutableMapOf<MsgLocale?, MutableMap<KClass<*>, MapperRegistration>>()
+    private val overrideRegistrations = mutableMapOf<MsgLocale?, MutableMap<KClass<*>, OverrideRegistration>>()
     private val pendingBundles = mutableMapOf<MsgLocale, MutableList<MsgBundle>>()
+
+    internal var revision: Long = 0
+        private set
 
     init {
         msgAggregates.forEach { registerBundle(it) }
@@ -14,6 +18,7 @@ class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
     fun registerBundle(msgAggregate: MsgAggregate) {
         if (msgAggregate is MsgBundle) {
             pendingBundles.getOrPut(msgAggregate.locale) { mutableListOf() }.add(msgAggregate)
+            revision += 1
             return
         }
 
@@ -26,28 +31,56 @@ class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
         }
 
         registrationsForLocale[clazz] = registration
+        revision += 1
     }
 
     @Suppress("UNCHECKED_CAST")
     fun <S : Any, T : Any> registerMapper(
         sourceClass: KClass<S>,
         targetClass: KClass<T>,
+        locale: MsgLocale? = null,
+        sourceLocale: MsgLocale? = null,
         registration: (S) -> T,
     ) {
-        mapperRegistrations[targetClass] = MapperRegistration(
+        val registrationsForLocale = mapperRegistrations.getOrPut(locale) { mutableMapOf() }
+        check(targetClass !in registrationsForLocale) {
+            "Duplicate base mapper [translationClass='${targetClass.simpleName}', locale='${locale?.languageTag ?: "global"}']"
+        }
+        registrationsForLocale[targetClass] = MapperRegistration(
             sourceClass = sourceClass,
+            sourceLocale = sourceLocale,
             registration = { source -> registration(source as S) },
         )
+        revision += 1
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    fun <S : Any, T : Any> registerMapper(
+        sourceClass: KClass<S>,
+        targetClass: KClass<T>,
+        locale: MsgLocale? = null,
+        sourceLocale: MsgLocale? = null,
+        registration: (S, T) -> T,
+    ) {
+        val registrationsForLocale = overrideRegistrations.getOrPut(locale) { mutableMapOf() }
+        check(targetClass !in registrationsForLocale) {
+            "Duplicate override mapper [translationClass='${targetClass.simpleName}', locale='${locale?.languageTag ?: "global"}']"
+        }
+        registrationsForLocale[targetClass] = OverrideRegistration(
+            sourceClass = sourceClass,
+            sourceLocale = sourceLocale,
+            registration = { source, target -> registration(source as S, target as T) },
+        )
+        revision += 1
     }
 
     @Suppress("UNCHECKED_CAST")
     internal fun <T : Any> getTranslationClass(clazz: KClass<T>, locales: List<MsgLocale>): T {
         val fallbackLocales = locales.flatMap(::fallbackLocales).distinct()
-        ensureLocalesRegistered(fallbackLocales)
         return resolveTranslationClassOrNull(
             clazz = clazz,
             locales = fallbackLocales,
-            resolutionStack = emptySet(),
+            resolutionStack = emptyList(),
         ) as? T
             ?: error(
                 "Can not find translations for locales: [${fallbackLocales.joinToString(", ") { it.languageTag }}] " +
@@ -58,8 +91,46 @@ class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
     private fun resolveTranslationClassOrNull(
         clazz: KClass<*>,
         locales: List<MsgLocale>,
-        resolutionStack: Set<ResolutionKey>,
+        resolutionStack: List<ResolutionKey>,
     ): Any? {
+        var translation = resolveBaseTranslationClassOrNull(clazz, locales, resolutionStack) ?: return null
+        val resolutionKey = ResolutionKey(clazz, locales.first(), ResolutionPhase.FINAL)
+        checkResolutionCycle(resolutionKey, resolutionStack)
+        val nextStack = resolutionStack + resolutionKey
+
+        overrideRegistrations[null]?.get(clazz)?.let { overrideRegistration ->
+            translation = resolveOverrideOrNull(overrideRegistration, translation, locales, nextStack) ?: translation
+        }
+        locales.forEach { locale ->
+            val overrideRegistration = overrideRegistrations[locale]?.get(clazz) ?: return@forEach
+            resolveOverrideOrNull(overrideRegistration, translation, locales, nextStack)?.let { return it }
+        }
+
+        return translation
+    }
+
+    private fun resolveOverrideOrNull(
+        overrideRegistration: OverrideRegistration,
+        translation: Any,
+        locales: List<MsgLocale>,
+        resolutionStack: List<ResolutionKey>,
+    ): Any? {
+        val sourceLocales = overrideRegistration.sourceLocale?.let(::listOf) ?: locales
+        val source = resolveTranslationClassOrNull(
+            overrideRegistration.sourceClass,
+            sourceLocales,
+            resolutionStack,
+        ) ?: return null
+
+        return overrideRegistration.registration(source, translation)
+    }
+
+    private fun resolveBaseTranslationClassOrNull(
+        clazz: KClass<*>,
+        locales: List<MsgLocale>,
+        resolutionStack: List<ResolutionKey>,
+    ): Any? {
+        ensureLocalesRegistered(locales)
         locales.forEach { locale ->
             resolveMappedTranslationClassOrNull(
                 clazz = clazz,
@@ -80,27 +151,44 @@ class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
     private fun resolveMappedTranslationClassOrNull(
         clazz: KClass<*>,
         locale: MsgLocale,
-        resolutionStack: Set<ResolutionKey>,
+        resolutionStack: List<ResolutionKey>,
     ): Any? {
-        val mapperRegistration = mapperRegistrations[clazz] ?: return null
-        val resolutionKey = ResolutionKey(clazz = clazz, locale = locale)
-
-        if (resolutionKey in resolutionStack) {
+        val candidates = listOfNotNull(
+            mapperRegistrations[locale]?.get(clazz),
+            mapperRegistrations[null]?.get(clazz),
+        )
+        if (candidates.isEmpty()) {
             return null
         }
+        val resolutionKey = ResolutionKey(clazz, locale, ResolutionPhase.BASE)
+        checkResolutionCycle(resolutionKey, resolutionStack)
+        candidates.forEach { mapperRegistration ->
+            val sourceLocale = mapperRegistration.sourceLocale ?: locale
+            val sourceTranslation = resolveBaseTranslationClassOrNull(
+                clazz = mapperRegistration.sourceClass,
+                locales = listOf(sourceLocale),
+                resolutionStack = resolutionStack + resolutionKey,
+            ) ?: return@forEach
 
-        val sourceTranslation = resolveTranslationClassOrNull(
-            clazz = mapperRegistration.sourceClass,
-            locales = listOf(locale),
-            resolutionStack = resolutionStack + resolutionKey,
-        ) ?: return null
+            return mapperRegistration.registration(sourceTranslation)
+        }
 
-        return mapperRegistration.registration(sourceTranslation)
+        return null
+    }
+
+    private fun checkResolutionCycle(key: ResolutionKey, stack: List<ResolutionKey>) {
+        check(key !in stack) {
+            "Cyclic translation dependency: " + (stack + key).joinToString(" -> ") {
+                "${it.clazz.simpleName}[${it.locale.languageTag}, ${it.phase}]"
+            }
+        }
     }
 
     fun registeredLocales(): Set<MsgLocale> = buildSet {
         addAll(pendingBundles.keys)
         addAll(registrations.keys)
+        addAll(mapperRegistrations.keys.filterNotNull())
+        addAll(overrideRegistrations.keys.filterNotNull())
     }
 
     private fun ensureLocalesRegistered(locales: List<MsgLocale>) {
@@ -122,11 +210,24 @@ class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
 
     private data class MapperRegistration(
         val sourceClass: KClass<*>,
+        val sourceLocale: MsgLocale?,
         val registration: (Any) -> Any,
     )
 
     private data class ResolutionKey(
         val clazz: KClass<*>,
         val locale: MsgLocale,
+        val phase: ResolutionPhase,
     )
+
+    private data class OverrideRegistration(
+        val sourceClass: KClass<*>,
+        val sourceLocale: MsgLocale?,
+        val registration: (Any, Any) -> Any,
+    )
+
+    private enum class ResolutionPhase {
+        BASE,
+        FINAL,
+    }
 }

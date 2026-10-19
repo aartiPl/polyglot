@@ -9,6 +9,49 @@ import kotlin.test.assertFailsWith
 class PolyglotResolverTest {
 
     @Test
+    fun `Given Portuguese regional mapper when resolving translations then override selected fields and preserve base in either lookup order`() {
+        // Given
+        val portuguese = MsgLocale.of("pt")
+        val brazilianPortuguese = MsgLocale.of("pt-BR")
+        val baseBundle = object : MsgBundle() {
+            override val locale = portuguese
+
+            override fun register() {
+                add(TestStrings(name = "Nome", surname = "Apelido"))
+            }
+        }
+        val mapper = object : MsgMapper() {
+            override fun register() {
+                add<TestStrings>(
+                    locale = brazilianPortuguese,
+                    sourceLocale = portuguese,
+                ) { it.copy(surname = "Sobrenome") }
+            }
+        }
+
+        listOf(listOf(baseBundle, mapper), listOf(mapper, baseBundle)).forEach { registrationOrder ->
+            listOf(
+                listOf(portuguese, brazilianPortuguese),
+                listOf(brazilianPortuguese, portuguese),
+            ).forEach { lookupOrder ->
+                val resolver = PolyglotResolver(PolyglotRegistry(registrationOrder))
+
+                // When
+                lookupOrder.forEach { resolver.getTranslationClass(TestStrings::class, it) }
+                val base = resolver.getTranslationClass(TestStrings::class, portuguese)
+                val regional = resolver.getTranslationClass(TestStrings::class, brazilianPortuguese)
+
+                // Then
+                assertThat(base.name).isEqualTo("Nome")
+                assertThat(base.surname).isEqualTo("Apelido")
+                assertThat(regional.name).isEqualTo("Nome")
+                assertThat(regional.surname).isEqualTo("Sobrenome")
+                assertThat(resolver.registeredLocales()).isEqualTo(setOf(portuguese, brazilianPortuguese))
+            }
+        }
+    }
+
+    @Test
     fun `Given registered bundles when resolving translations then instantiate only requested locale lazily`() {
         // Given
         val counters = TranslationCounters()
@@ -237,7 +280,7 @@ class PolyglotResolverTest {
     }
 
     @Test
-    fun `Given cyclic mappers when resolving translation then stop recursion and report missing translation`() {
+    fun `Given cyclic mappers when resolving translation then report dependency path`() {
         // Given
         val polyglotResolver = PolyglotResolver(
             PolyglotRegistry(
@@ -253,8 +296,9 @@ class PolyglotResolverTest {
         }
 
         // Then
-        assertThat(exception).messageContains("Can not find translations for locales: [en]")
-        assertThat(exception).messageContains("[translationClass='RecursiveTargetStrings']")
+        assertThat(exception).messageContains("Cyclic translation dependency")
+        assertThat(exception).messageContains("RecursiveTargetStrings[en, BASE]")
+        assertThat(exception).messageContains("RecursiveSourceStrings[en, BASE]")
     }
 }
 
