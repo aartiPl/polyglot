@@ -56,9 +56,11 @@ dependencies {
 
 - `MsgLocale`: normalized locale value object based on language tags.
 - `MsgLocales`: predefined language, regional and script locales such as `EN`, `EN_US`, `PT_BR` and `ZH_HANT_TW`.
+- `MsgDefinition`: common type for bundles and aggregates accepted by the registry.
 - `MsgBundle`: translations for one locale.
-- `MsgAggregate`: hierarchical grouping of bundles and nested aggregates.
-- `MsgMapper`: base conversions, regional inheritance and application overrides.
+- `MsgTranslations`: local collector of the models created by a bundle.
+- `MsgRegistration`: local collector of definitions and mapper rules declared by an aggregate.
+- `MsgAggregate`: hierarchical grouping of bundles, nested aggregates and mapper rules.
 - `PolyglotRegistry`: registration and resolution backend.
 - `PolyglotResolver`: application-facing translation resolver with locale-aware caching.
 
@@ -81,12 +83,13 @@ Register locale bundles:
 import net.igsoft.polyglot.core.MsgBundle
 import net.igsoft.polyglot.core.MsgLocale
 import net.igsoft.polyglot.core.MsgLocales
+import net.igsoft.polyglot.core.MsgTranslations
 
 class GreetingBundleEn : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.EN
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             GreetingStrings(
                 hello = "Hello",
                 goodbye = "Goodbye",
@@ -108,7 +111,7 @@ val resolver = PolyglotResolver(
     )
 )
 
-val strings = resolver.getTranslationClass(GreetingStrings::class)
+val strings = resolver.getTranslationClass<GreetingStrings>()
 println(strings.hello)
 ```
 
@@ -137,8 +140,8 @@ data class SearchStrings(
 class SearchBundleEn : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.EN
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             SearchStrings(
                 placeholder = "Search",
                 clear = "Clear",
@@ -150,8 +153,8 @@ class SearchBundleEn : MsgBundle() {
 class SearchBundlePl : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.PL
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             SearchStrings(
                 placeholder = "Szukaj",
                 clear = "Wyczyść",
@@ -161,15 +164,15 @@ class SearchBundlePl : MsgBundle() {
 }
 
 class SearchAggregate : MsgAggregate() {
-    override fun register() {
-        addBundle(SearchBundleEn())
-        addBundle(SearchBundlePl())
+    override fun register(registration: MsgRegistration) {
+        registration.registerBundle(SearchBundleEn())
+        registration.registerBundle(SearchBundlePl())
     }
 }
 
 class AppAggregate : MsgAggregate() {
-    override fun register() {
-        addBundle(SearchAggregate())
+    override fun register(registration: MsgRegistration) {
+        registration.registerBundle(SearchAggregate())
     }
 }
 
@@ -231,13 +234,15 @@ val traditionalChineseTaiwan = MsgLocales.ZH_HANT_TW
 `MsgBundle` defines translations for a single locale.
 
 - one bundle instance has exactly one `locale`,
-- `add(instance)` registers one translation object under its Kotlin type,
-- `add(instance, clazz)` lets you register it explicitly under a selected type.
+- implement `register(translations: MsgTranslations)` to collect the bundle's models,
+- `translations.add(instance)` registers one translation object under its Kotlin type,
+- `translations.add<T>(instance)` registers a model under an explicitly selected type,
+- `translations.add(instance, clazz)` lets you register it explicitly under a selected type.
 
 Create fresh models inside `register()` and register the same translation types on each invocation.
-The registry retains the bundle and calls `register()` again when its released models are requested.
-Keep model instances local to `register()` so the bundle does not retain released translations.
-Register mappers and nested aggregates outside locale bundles.
+The registry invokes this method lazily and publishes the collected models after it returns successfully.
+It retains the bundle and calls the same method again when released models are requested.
+Keep models and the collector local to the invocation so the bundle does not retain released translations.
 
 This makes bundles a good fit for leaf-level module translations.
 
@@ -247,20 +252,27 @@ This makes bundles a good fit for leaf-level module translations.
 
 - it can register bundles,
 - it can register other aggregates,
+- it can declare base conversions, regional inheritance and application overrides,
 - it does not represent one locale by itself,
 - it is the main tool for building module-level and app-level translation trees.
 
-The protected `registry` property is available only while `register()` is executing.
+Implement `register(registration: MsgRegistration)` and add definitions with `registration.registerBundle(...)`.
+Bundles and aggregates implement `MsgDefinition`; use this type for mixed collections of definitions.
+The registry applies the collected declarations after the entire aggregate tree registers successfully and mapper duplicates are validated.
+Bundle models remain lazy. Keep the collector local to `register()`; later additions do not update the registry.
 
-### `MsgMapper`
+### Mapper rules
 
-`MsgMapper` supports base conversions `(S) -> T` and application overrides `(S, T) -> T`.
+Declare base conversions `(S) -> T` and application overrides `(S, T) -> T` through
+`MsgRegistration.registerMapper(...)` inside `MsgAggregate.register()`.
 
 | Operation | Declaration | Use |
 | --- | --- | --- |
-| Base conversion | `add<S, T> { source -> ... }` | Build a complete `T` from another model; a bundle for `T` is optional. |
-| Regional inheritance | `add<T>(locale = ..., sourceLocale = ...) { base -> ... }` | Build a regional base by copying selected fields from another locale. |
-| Application override | `add<S, T> { source, target -> ... }` | Copy selected fields into an existing `T`, preserving its other translations. |
+| Base conversion | `registration.registerMapper<S, T> { source -> ... }` | Build a complete `T` from another model; a bundle for `T` is optional. |
+| Regional inheritance | `registration.registerMapper<T>(locale = ..., sourceLocale = ...) { base -> ... }` | Build a regional base by copying selected fields from another locale. |
+| Application override | `registration.registerMapper<S, T> { source, target -> ... }` | Copy selected fields into an existing `T`, preserving its other translations. |
+
+Both `MsgRegistration` and `PolyglotRegistry` provide these generic overloads and equivalent overloads accepting `KClass` values.
 
 The locale parameters have separate roles:
 
@@ -280,9 +292,9 @@ data class SearchFieldStrings(
     val back: String,
 )
 
-class SearchFieldMapper : MsgMapper() {
-    override fun register() {
-        add<CommonStrings, SearchFieldStrings> { strings ->
+class SearchFieldMapper : MsgAggregate() {
+    override fun register(registration: MsgRegistration) {
+        registration.registerMapper<CommonStrings, SearchFieldStrings> { strings ->
             SearchFieldStrings(
                 clear = strings.clear,
                 back = strings.back,
@@ -316,8 +328,8 @@ data class AccountStrings(
 class AccountBundlePt : MsgBundle() {
     override val locale = MsgLocales.PT
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             AccountStrings(
                 phone = "Telemóvel",
                 save = "Guardar",
@@ -327,9 +339,9 @@ class AccountBundlePt : MsgBundle() {
     }
 }
 
-class AccountMapper : MsgMapper() {
-    override fun register() {
-        add<AccountStrings>(
+class AccountMapper : MsgAggregate() {
+    override fun register(registration: MsgRegistration) {
+        registration.registerMapper<AccountStrings>(
             locale = MsgLocales.PT_BR,
             sourceLocale = MsgLocales.PT,
         ) {
@@ -344,7 +356,7 @@ class AccountMapper : MsgMapper() {
 val resolver = PolyglotResolver(
     PolyglotRegistry(listOf(AccountBundlePt(), AccountMapper()))
 )
-val strings = resolver.getTranslationClass(AccountStrings::class, MsgLocales.PT_BR)
+val strings = resolver.getTranslationClass<AccountStrings>(MsgLocales.PT_BR)
 // AccountStrings(phone=Celular, save=Salvar, cancel=Cancelar)
 ```
 
@@ -363,14 +375,14 @@ data class CommonActionStrings(
 class CommonActionBundlePt : MsgBundle() {
     override val locale = MsgLocales.PT
 
-    override fun register() {
-        add(CommonActionStrings(save = "OK"))
+    override fun register(translations: MsgTranslations) {
+        translations.add(CommonActionStrings(save = "OK"))
     }
 }
 
-class AccountApplicationMapper : MsgMapper() {
-    override fun register() {
-        add<CommonActionStrings, AccountStrings> { common, account ->
+class AccountApplicationMapper : MsgAggregate() {
+    override fun register(registration: MsgRegistration) {
+        registration.registerMapper<CommonActionStrings, AccountStrings> { common, account ->
             account.copy(save = common.save)
         }
     }
@@ -386,7 +398,7 @@ val applicationResolver = PolyglotResolver(
         )
     )
 )
-val applicationStrings = applicationResolver.getTranslationClass(AccountStrings::class, MsgLocales.PT_BR)
+val applicationStrings = applicationResolver.getTranslationClass<AccountStrings>(MsgLocales.PT_BR)
 // AccountStrings(phone=Celular, save=OK, cancel=Cancelar)
 ```
 
@@ -394,10 +406,12 @@ The component's `pt-BR` base supplies `Celular` and `Salvar`. The application ov
 independently through `pt-BR -> pt -> en`, finds `OK` in `pt` and changes only `save`.
 The regional phone label and inherited cancel label retain their values.
 
-To limit an application override to `pt-BR`, specify only `locale` inside `MsgMapper.register()`:
+To limit an application override to `pt-BR`, specify only `locale` inside `MsgAggregate.register()`:
 
 ```kotlin
-add<CommonActionStrings, AccountStrings>(locale = MsgLocales.PT_BR) { common, account ->
+registration.registerMapper<CommonActionStrings, AccountStrings>(
+    locale = MsgLocales.PT_BR,
+) { common, account ->
     account.copy(save = common.save)
 }
 ```
@@ -427,8 +441,9 @@ Localized mapper target locales are included in `registeredLocales()`.
 
 Key behaviors:
 
-- accepts top-level aggregates in the constructor,
+- accepts top-level `MsgDefinition` values in the constructor,
 - supports incremental registration through `registerBundle(...)`,
+- supports direct factories through `registerTranslationClass<T>(locale) { ... }` or the overload accepting `KClass<T>`,
 - keeps locale bundles pending and registers them lazily on first use,
 - retains each effective bundle translation's owner so released models can be rebuilt without changing registration precedence,
 - builds translation bases before applying global and localized application overrides,
@@ -444,15 +459,16 @@ val resolver = PolyglotResolver(PolyglotRegistry(listOf(AppAggregate())))
 
 resolver.setCurrentLocale(MsgLocales.PL)
 
-val stringsA = resolver.getTranslationClass(SearchStrings::class)
-val stringsB = resolver.getTranslationClass(SearchStrings::class, MsgLocales.EN_US)
+val stringsA = resolver.getTranslationClass<SearchStrings>()
+val stringsB = resolver.getTranslationClass<SearchStrings>(MsgLocales.EN_US)
 val locales = resolver.registeredLocales()
 ```
 
 Behavior:
 
-- `getTranslationClass(clazz)` resolves using the current locale,
-- `getTranslationClass(clazz, locale)` resolves using an explicit locale,
+- `getTranslationClass<T>()` resolves using the current locale,
+- `getTranslationClass<T>(locale)` resolves using an explicit locale,
+- equivalent overloads accept `KClass<T>` instead of reified type parameters,
 - default fallback locale is English,
 - final results are cached by requested locale and translation type,
 - registry changes invalidate cached results on the next lookup, including changes to mapper sources,
@@ -479,7 +495,7 @@ fun main() {
 
     resolver.setCurrentLocale(MsgLocale.of("pl-PL"))
 
-    val strings = resolver.getTranslationClass(SearchStrings::class)
+    val strings = resolver.getTranslationClass<SearchStrings>()
     println(strings.placeholder)
 }
 ```
@@ -516,11 +532,14 @@ Compose API:
 
 - `AppLocalizationProvider(polyglotResolver, initialLocale, content)` uses an explicit resolver,
 - `rememberTranslations<MyStrings>()` resolves typed translations from the current composition,
+- `rememberTranslations<MyStrings>(polyglotResolver)` uses an explicit resolver and the composition locale; both forms also accept `KClass<MyStrings>`,
+- translation lookups use `LocalLocale` explicitly and reuse the resolver's revision-aware cache,
 - `LocalLocale` exposes the active `MsgLocale`,
 - `LocalSetLocale` lets the UI switch locale with `MsgLocale`,
 - `LocalPolyglotResolver` exposes the resolver to nested composables.
 
 This keeps the UI integration thin. Locale state lives in Compose, but translation ownership and registration still stay in `polyglot-core`.
+After incremental registration, recompose the consuming content to display the updated translations.
 
 ## Build
 

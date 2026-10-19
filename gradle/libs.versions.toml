@@ -4,7 +4,6 @@ composeCompilerVersion = "2.4.21"
 agpVersion = "9.3.3"
 testLoggerVersion = "4.0.0"
 mavenPublishVersion = "0.37.0"
-atomicfuVersion = "0.33.0"
 composeVersion = "1.12.2"
 test-assertkVersion = "0.28.1"
 
@@ -16,7 +15,6 @@ test-logger = { id = "com.adarshr.test-logger", version.ref = "testLoggerVersion
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublishVersion" }
 
 [libraries]
-atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "atomicfuVersion" }
 compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "composeVersion" }
 compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "composeVersion" }
 test-assertk = { module = "com.willowtreeapps.assertk:assertk", version.ref = "test-assertkVersion" }

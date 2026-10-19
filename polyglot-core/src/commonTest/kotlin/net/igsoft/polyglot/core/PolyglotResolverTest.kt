@@ -16,13 +16,15 @@ class PolyglotResolverTest {
         val baseBundle = object : MsgBundle() {
             override val locale = portuguese
 
-            override fun register() {
-                add(TestStrings(name = "Nome", surname = "Apelido"))
+            override fun register(translations: MsgTranslations) {
+                translations.add(TestStrings(name = "Nome", surname = "Apelido"))
             }
         }
-        val mapper = object : MsgMapper() {
-            override fun register() {
-                add<TestStrings>(
+        val mapper = object : MsgAggregate() {
+            override fun register(registration: MsgRegistration) {
+                registration.registerMapper(
+                    TestStrings::class,
+                    TestStrings::class,
                     locale = brazilianPortuguese,
                     sourceLocale = portuguese,
                 ) { it.copy(surname = "Sobrenome") }
@@ -330,39 +332,39 @@ private data class RecursiveTargetStrings(
 )
 
 private class RepositoryAggregate : MsgAggregate() {
-    override fun register() {
-        addBundle(RepositoryBundlePl())
-        addBundle(RepositoryBundleEn())
+    override fun register(registration: MsgRegistration) {
+        registration.registerBundle(RepositoryBundlePl())
+        registration.registerBundle(RepositoryBundleEn())
     }
 }
 
 private class RegionalRepositoryAggregate : MsgAggregate() {
-    override fun register() {
-        addBundle(RegionalRepositoryBundleUs())
+    override fun register(registration: MsgRegistration) {
+        registration.registerBundle(RegionalRepositoryBundleUs())
     }
 }
 
 private class NonStandardLocaleAggregate(
     private val locale: MsgLocale,
 ) : MsgAggregate() {
-    override fun register() {
-        addBundle(NonStandardLocaleBundle(locale))
+    override fun register(registration: MsgRegistration) {
+        registration.registerBundle(NonStandardLocaleBundle(locale))
     }
 }
 
 private class MapperAggregate(
-    private vararg val msgAggregates: MsgAggregate,
+    private vararg val definitions: MsgDefinition,
 ) : MsgAggregate() {
-    override fun register() {
-        msgAggregates.forEach(::addBundle)
+    override fun register(registration: MsgRegistration) {
+        definitions.forEach(registration::registerBundle)
     }
 }
 
 private class RepositoryBundlePl : MsgBundle() {
     override val locale: MsgLocale = localePl
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             TestStrings(
                 name = "Imię",
                 surname = "Nazwisko",
@@ -374,8 +376,8 @@ private class RepositoryBundlePl : MsgBundle() {
 private class RepositoryBundleEn : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.EN
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             TestStrings(
                 name = "Name",
                 surname = "Surname",
@@ -387,8 +389,8 @@ private class RepositoryBundleEn : MsgBundle() {
 private class RegionalRepositoryBundleUs : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.EN_US
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             SecondaryStrings(
                 label = "Secondary US",
             )
@@ -399,8 +401,8 @@ private class RegionalRepositoryBundleUs : MsgBundle() {
 private class NonStandardLocaleBundle(
     override val locale: MsgLocale,
 ) : MsgBundle() {
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             TestStrings(
                 name = "Non standard",
                 surname = "Non standard",
@@ -412,8 +414,8 @@ private class NonStandardLocaleBundle(
 private class SearchFieldBundleEn : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.EN
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             SearchFieldStrings(
                 clear = "Dismiss",
                 back = "Navigate up",
@@ -425,8 +427,8 @@ private class SearchFieldBundleEn : MsgBundle() {
 private class CommonBundlePl : MsgBundle() {
     override val locale: MsgLocale = localePl
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             CommonStrings(
                 clear = "Wyczyść",
                 back = "Wróć",
@@ -438,8 +440,8 @@ private class CommonBundlePl : MsgBundle() {
 private class CommonBundleEn : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.EN
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             CommonStrings(
                 clear = "Clear",
                 back = "Back",
@@ -448,9 +450,9 @@ private class CommonBundleEn : MsgBundle() {
     }
 }
 
-private class SearchFieldMapper : MsgMapper() {
-    override fun register() {
-        add<CommonStrings, SearchFieldStrings> { strings ->
+private class SearchFieldMapper : MsgAggregate() {
+    override fun register(registration: MsgRegistration) {
+        registration.registerMapper(CommonStrings::class, SearchFieldStrings::class) { strings ->
             SearchFieldStrings(
                 clear = strings.clear,
                 back = strings.back,
@@ -460,23 +462,23 @@ private class SearchFieldMapper : MsgMapper() {
 }
 
 private class CyclicMapperAggregate : MsgAggregate() {
-    override fun register() {
-        addBundle(RecursiveSourceMapper())
-        addBundle(RecursiveTargetMapper())
+    override fun register(registration: MsgRegistration) {
+        registration.registerBundle(RecursiveSourceMapper())
+        registration.registerBundle(RecursiveTargetMapper())
     }
 }
 
-private class RecursiveSourceMapper : MsgMapper() {
-    override fun register() {
-        add<RecursiveTargetStrings, RecursiveSourceStrings> { strings ->
+private class RecursiveSourceMapper : MsgAggregate() {
+    override fun register(registration: MsgRegistration) {
+        registration.registerMapper(RecursiveTargetStrings::class, RecursiveSourceStrings::class) { strings ->
             RecursiveSourceStrings(strings.value)
         }
     }
 }
 
-private class RecursiveTargetMapper : MsgMapper() {
-    override fun register() {
-        add<RecursiveSourceStrings, RecursiveTargetStrings> { strings ->
+private class RecursiveTargetMapper : MsgAggregate() {
+    override fun register(registration: MsgRegistration) {
+        registration.registerMapper(RecursiveSourceStrings::class, RecursiveTargetStrings::class) { strings ->
             RecursiveTargetStrings(strings.value)
         }
     }
@@ -485,8 +487,8 @@ private class RecursiveTargetMapper : MsgMapper() {
 private class SearchFieldBundlePlPl : MsgBundle() {
     override val locale: MsgLocale = localePlPl
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             SearchFieldStrings(
                 clear = "Wyczyść (Polska)",
                 back = "Wróć (Polska)",
@@ -498,9 +500,9 @@ private class SearchFieldBundlePlPl : MsgBundle() {
 private class LazyRepositoryAggregate(
     private val counters: TranslationCounters,
 ) : MsgAggregate() {
-    override fun register() {
-        addBundle(LazyRepositoryBundleEn(counters))
-        addBundle(LazyRepositoryBundlePl(counters))
+    override fun register(registration: MsgRegistration) {
+        registration.registerBundle(LazyRepositoryBundleEn(counters))
+        registration.registerBundle(LazyRepositoryBundlePl(counters))
     }
 }
 
@@ -509,15 +511,15 @@ private class LazyRepositoryBundleEn(
 ) : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.EN
 
-    override fun register() {
+    override fun register(translations: MsgTranslations) {
         counters.englishBundleRegistrationCount += 1
-        add(
+        translations.add(
             TestStrings(
                 name = "Name",
                 surname = "Surname",
             )
         )
-        add(
+        translations.add(
             SecondaryStrings(label = "Secondary")
         )
     }
@@ -528,15 +530,15 @@ private class LazyRepositoryBundlePl(
 ) : MsgBundle() {
     override val locale: MsgLocale = localePl
 
-    override fun register() {
+    override fun register(translations: MsgTranslations) {
         counters.polishBundleRegistrationCount += 1
-        add(
+        translations.add(
             TestStrings(
                 name = "Imię",
                 surname = "Nazwisko",
             )
         )
-        add(
+        translations.add(
             SecondaryStrings(label = "Pomocniczy")
         )
     }

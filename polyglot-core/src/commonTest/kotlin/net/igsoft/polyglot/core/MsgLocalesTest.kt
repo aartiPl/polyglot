@@ -46,13 +46,18 @@ class MsgLocalesTest {
         val bundle = object : MsgBundle() {
             override val locale = MsgLocales.PT
 
-            override fun register() {
-                add(Strings("Guardar"))
+            override fun register(translations: MsgTranslations) {
+                translations.add(Strings("Guardar"))
             }
         }
-        val mapper = object : MsgMapper() {
-            override fun register() {
-                add<Strings>(locale = MsgLocales.PT_BR, sourceLocale = MsgLocales.PT) {
+        val mapper = object : MsgAggregate() {
+            override fun register(registration: MsgRegistration) {
+                registration.registerMapper(
+                    Strings::class,
+                    Strings::class,
+                    locale = MsgLocales.PT_BR,
+                    sourceLocale = MsgLocales.PT,
+                ) {
                     it.copy(label = "Salvar")
                 }
             }

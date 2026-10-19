@@ -9,6 +9,10 @@ class PolyglotResolver(private val registry: PolyglotRegistry) {
 
     private var currentLocale: MsgLocale = defaultLocale
 
+    inline fun <reified T : Any> getTranslationClass(): T = getTranslationClass(T::class)
+
+    inline fun <reified T : Any> getTranslationClass(locale: MsgLocale): T = getTranslationClass(T::class, locale)
+
     fun <T : Any> getTranslationClass(clazz: KClass<T>): T {
         return getTranslationClass(clazz, currentLocale)
     }

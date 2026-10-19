@@ -29,12 +29,22 @@ class MapperCompositionTest {
 
     @Test
     fun `Given regional inheritance for component and common strings when resolving then compose both before application override`() {
-        val mapper = object : MsgMapper() {
-            override fun register() {
-                add<ComponentStrings>(locale = brazilianPortuguese, sourceLocale = portuguese) {
+        val mapper = object : MsgAggregate() {
+            override fun register(registration: MsgRegistration) {
+                registration.registerMapper(
+                    ComponentStrings::class,
+                    ComponentStrings::class,
+                    locale = brazilianPortuguese,
+                    sourceLocale = portuguese,
+                ) {
                     it.copy(confirm = "Regional default", phone = "Celular")
                 }
-                add<CommonStrings>(locale = brazilianPortuguese, sourceLocale = portuguese) {
+                registration.registerMapper(
+                    CommonStrings::class,
+                    CommonStrings::class,
+                    locale = brazilianPortuguese,
+                    sourceLocale = portuguese,
+                ) {
                     it.copy(ok = "OK Brasil")
                 }
             }
@@ -195,9 +205,9 @@ class MapperCompositionTest {
         val sourceBundle = object : MsgBundle() {
             override val locale = MsgLocales.PL
 
-            override fun register() {
+            override fun register(translations: MsgTranslations) {
                 registrations += 1
-                add(CommonStrings("OK Polska"))
+                translations.add(CommonStrings("OK Polska"))
             }
         }
         val registry = PolyglotRegistry(listOf(componentBundle(portuguese), sourceBundle))
@@ -251,12 +261,17 @@ class MapperCompositionTest {
     @Test
     fun `Given inherited base and application override when resolving then apply override only after inheritance`() {
         var calls = 0
-        val mapper = object : MsgMapper() {
-            override fun register() {
-                add<ComponentStrings>(locale = brazilianPortuguese, sourceLocale = portuguese) {
+        val mapper = object : MsgAggregate() {
+            override fun register(registration: MsgRegistration) {
+                registration.registerMapper(
+                    ComponentStrings::class,
+                    ComponentStrings::class,
+                    locale = brazilianPortuguese,
+                    sourceLocale = portuguese,
+                ) {
                     it.copy(phone = "Celular")
                 }
-                add<CommonStrings, ComponentStrings> { common, component ->
+                registration.registerMapper(CommonStrings::class, ComponentStrings::class) { common, component ->
                     calls += 1
                     component.copy(confirm = "${component.confirm} ${common.ok}")
                 }
@@ -366,22 +381,24 @@ class MapperCompositionTest {
     private fun componentBundle(locale: MsgLocale, phone: String = "Telemóvel") = object : MsgBundle() {
         override val locale = locale
 
-        override fun register() {
-            add(ComponentStrings("Confirmar", phone, "Cancelar"))
+        override fun register(translations: MsgTranslations) {
+            translations.add(ComponentStrings("Confirmar", phone, "Cancelar"))
         }
     }
 
     private fun commonBundle(locale: MsgLocale, ok: String) = object : MsgBundle() {
         override val locale = locale
 
-        override fun register() {
-            add(CommonStrings(ok))
+        override fun register(translations: MsgTranslations) {
+            translations.add(CommonStrings(ok))
         }
     }
 
-    private fun applicationMapper() = object : MsgMapper() {
-        override fun register() {
-            add<CommonStrings, ComponentStrings> { common, component -> component.copy(confirm = common.ok) }
+    private fun applicationMapper() = object : MsgAggregate() {
+        override fun register(registration: MsgRegistration) {
+            registration.registerMapper(CommonStrings::class, ComponentStrings::class) { common, component ->
+                component.copy(confirm = common.ok)
+            }
         }
     }
 

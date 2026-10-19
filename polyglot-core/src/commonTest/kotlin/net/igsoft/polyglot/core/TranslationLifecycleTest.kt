@@ -110,8 +110,8 @@ class TranslationLifecycleTest {
             registry.registerBundle(object : MsgBundle() {
                 override val locale = MsgLocales.EN
 
-                override fun register() {
-                    add(Strings("Latest"))
+                override fun register(translations: MsgTranslations) {
+                    translations.add(Strings("Latest"))
                 }
             })
             assertEquals("Latest", resolver.getTranslationClass(Strings::class).label)
@@ -176,36 +176,109 @@ class TranslationLifecycleTest {
     }
 
     @Test
-    fun `Given retained bundle when registering and reloading then bind the registry only during registration`() {
+    fun `Given failed initial bundle loading when retrying then publish only a complete set of models`() {
+        var attempts = 0
+        val calls = mutableMapOf<MsgLocale, Int>()
+        val firstBundle = bundle(MsgLocales.EN, calls)
         val bundle = object : MsgBundle() {
             override val locale = MsgLocales.EN
 
-            fun boundRegistry() = registry
+            override fun register(translations: MsgTranslations) {
+                attempts += 1
+                translations.add(Strings("Attempt $attempts"))
+                check(attempts != 1) { "Loading failed" }
+                translations.add(SecondaryStrings("Complete"))
+            }
+        }
+        val resolver = PolyglotResolver(PolyglotRegistry(listOf(firstBundle, bundle)))
 
-            override fun register() {
-                add(Strings("English"))
+        assertFailsWith<IllegalStateException> { resolver.getTranslationClass(Strings::class) }
+
+        assertEquals("Complete", resolver.getTranslationClass(SecondaryStrings::class).label)
+        assertEquals("Attempt 2", resolver.getTranslationClass(Strings::class).label)
+        assertEquals(2, attempts)
+        assertEquals(1, calls[MsgLocales.EN])
+    }
+
+    @Test
+    fun `Given failed bundle restoration when retrying another type then discard partially created models`() {
+        var attempts = 0
+        val bundle = object : MsgBundle() {
+            override val locale = MsgLocales.EN
+
+            override fun register(translations: MsgTranslations) {
+                attempts += 1
+                translations.add(Strings("Attempt $attempts"))
+                check(attempts != 2) { "Restoration failed" }
+                translations.add(SecondaryStrings("Complete"))
+            }
+        }
+        val resolver = PolyglotResolver(PolyglotRegistry(listOf(bundle)))
+        resolver.getTranslationClass(Strings::class)
+        resolver.setCurrentLocale(MsgLocales.PL)
+
+        assertFailsWith<IllegalStateException> { resolver.getTranslationClass(SecondaryStrings::class) }
+
+        assertEquals("Attempt 3", resolver.getTranslationClass(Strings::class).label)
+        assertEquals("Complete", resolver.getTranslationClass(SecondaryStrings::class).label)
+        assertEquals(3, attempts)
+    }
+
+    @Test
+    fun `Given missing model during restoration when retrying then keep all owned models released`() {
+        var attempts = 0
+        val bundle = object : MsgBundle() {
+            override val locale = MsgLocales.EN
+
+            override fun register(translations: MsgTranslations) {
+                attempts += 1
+                translations.add(Strings("Attempt $attempts"))
+                if (attempts != 2) {
+                    translations.add(SecondaryStrings("Complete"))
+                }
+            }
+        }
+        val resolver = PolyglotResolver(PolyglotRegistry(listOf(bundle)))
+        resolver.getTranslationClass(Strings::class)
+        resolver.setCurrentLocale(MsgLocales.PL)
+
+        assertFailsWith<IllegalStateException> { resolver.getTranslationClass(Strings::class) }
+
+        assertEquals("Attempt 3", resolver.getTranslationClass(Strings::class).label)
+        assertEquals("Complete", resolver.getTranslationClass(SecondaryStrings::class).label)
+        assertEquals(3, attempts)
+    }
+
+    @Test
+    fun `Given shared bundle when loading and reloading in separate registries then create independent models`() {
+        val bundle = object : MsgBundle() {
+            override val locale = MsgLocales.EN
+
+            override fun register(translations: MsgTranslations) {
+                translations.add(Strings("English"))
             }
         }
         val firstRegistry = PolyglotRegistry(listOf(bundle))
         val secondRegistry = PolyglotRegistry(listOf(bundle))
         val resolver = PolyglotResolver(firstRegistry)
-        resolver.getTranslationClass(Strings::class)
-        assertFailsWith<IllegalStateException> { bundle.boundRegistry() }
-        secondRegistry.getTranslationClass(Strings::class, listOf(MsgLocales.EN))
-        assertFailsWith<IllegalStateException> { bundle.boundRegistry() }
+        val first = resolver.getTranslationClass(Strings::class)
+        val second = secondRegistry.getTranslationClass(Strings::class, listOf(MsgLocales.EN))
+        assertNotSame(first, second)
 
         resolver.setCurrentLocale(MsgLocales.PL)
-        assertEquals("English", resolver.getTranslationClass(Strings::class).label)
-        assertFailsWith<IllegalStateException> { bundle.boundRegistry() }
+        val restored = resolver.getTranslationClass(Strings::class)
+        assertEquals("English", restored.label)
+        assertNotSame(first, restored)
+        assertSame(second, secondRegistry.getTranslationClass(Strings::class, listOf(MsgLocales.EN)))
     }
 
     private fun bundle(locale: MsgLocale, calls: MutableMap<MsgLocale, Int>) = object : MsgBundle() {
         override val locale = locale
 
-        override fun register() {
+        override fun register(translations: MsgTranslations) {
             calls[locale] = (calls[locale] ?: 0) + 1
-            add(Strings(locale.languageTag))
-            add(SecondaryStrings(locale.languageTag))
+            translations.add(Strings(locale.languageTag))
+            translations.add(SecondaryStrings(locale.languageTag))
         }
     }
 

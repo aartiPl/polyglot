@@ -21,10 +21,6 @@ kotlin {
     jvmToolchain(17)
 
     sourceSets {
-        commonMain.dependencies {
-            implementation(libs.atomicfu)
-        }
-
         commonTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.test.assertk)

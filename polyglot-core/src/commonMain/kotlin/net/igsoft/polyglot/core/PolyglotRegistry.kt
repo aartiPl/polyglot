@@ -1,29 +1,53 @@
 package net.igsoft.polyglot.core
 
+import kotlin.jvm.JvmName
 import kotlin.reflect.KClass
 
-class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
+class PolyglotRegistry(definitions: List<MsgDefinition> = emptyList()) {
     private val registrations = mutableMapOf<MsgLocale, MutableMap<KClass<*>, TranslationRegistration>>()
     private val mapperRegistrations = mutableMapOf<MsgLocale?, MutableMap<KClass<*>, MapperRegistration>>()
     private val overrideRegistrations = mutableMapOf<MsgLocale?, MutableMap<KClass<*>, OverrideRegistration>>()
-    private val pendingBundles = mutableMapOf<MsgLocale, MutableList<MsgBundle>>()
-    private val reloadingBundles = mutableSetOf<MsgBundle>()
+    private val pendingBundles = mutableMapOf<MsgLocale, ArrayDeque<MsgBundle>>()
 
     internal var revision: Long = 0
         private set
 
     init {
-        msgAggregates.forEach { registerBundle(it) }
+        definitions.forEach { registerBundle(it) }
     }
 
-    fun registerBundle(msgAggregate: MsgAggregate) {
-        if (msgAggregate is MsgBundle) {
-            pendingBundles.getOrPut(msgAggregate.locale) { mutableListOf() }.add(msgAggregate)
-            revision += 1
-            return
+    fun registerBundle(definition: MsgDefinition) {
+        when (definition) {
+            is MsgBundle -> {
+                pendingBundles.getOrPut(definition.locale) { ArrayDeque() }.addLast(definition)
+                revision += 1
+            }
+            is MsgAggregate -> {
+                val registration = MsgRegistration()
+                definition.register(registration)
+                applyRegistration(registration)
+            }
         }
+    }
 
-        msgAggregate.register(this)
+    private fun applyRegistration(registration: MsgRegistration) {
+        registration.validateAgainst(mapperRegistrations, overrideRegistrations)
+        registration.bundles.forEach { bundle ->
+            pendingBundles.getOrPut(bundle.locale) { ArrayDeque() }.addLast(bundle)
+            revision += 1
+        }
+        registration.mappers.forEach { (locale, entries) ->
+            mapperRegistrations.getOrPut(locale) { mutableMapOf() }.putAll(entries)
+            revision += entries.size
+        }
+        registration.overrides.forEach { (locale, entries) ->
+            overrideRegistrations.getOrPut(locale) { mutableMapOf() }.putAll(entries)
+            revision += entries.size
+        }
+    }
+
+    inline fun <reified T : Any> registerTranslationClass(locale: MsgLocale, noinline registration: () -> T) {
+        registerTranslationClass(locale, T::class, registration)
     }
 
     fun <T : Any> registerTranslationClass(locale: MsgLocale, clazz: KClass<T>, registration: () -> T) {
@@ -32,20 +56,6 @@ class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
         }
 
         registrationsForLocale[clazz] = DirectRegistration(registration)
-        revision += 1
-    }
-
-    internal fun <T : Any> registerBundleTranslation(bundle: MsgBundle, clazz: KClass<T>, instance: T) {
-        val registrationsForLocale = registrations.getOrPut(bundle.locale) { mutableMapOf() }
-        if (bundle in reloadingBundles) {
-            val registration = registrationsForLocale[clazz] as? BundleRegistration
-            if (registration?.bundle === bundle) {
-                registration.instance = instance
-            }
-            return
-        }
-
-        registrationsForLocale[clazz] = BundleRegistration(bundle, instance)
         revision += 1
     }
 
@@ -63,13 +73,7 @@ class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
         is DirectRegistration -> registration.registration()
         is BundleRegistration -> {
             if (registration.instance == null) {
-                val bundle = registration.bundle
-                check(reloadingBundles.add(bundle)) { "Cyclic bundle registration [locale='${bundle.locale.languageTag}']" }
-                try {
-                    bundle.register(this)
-                } finally {
-                    reloadingBundles.remove(bundle)
-                }
+                restoreBundle(registration.bundle)
             }
             checkNotNull(registration.instance) {
                 "Bundle must recreate its registered translation types [locale='${registration.bundle.locale.languageTag}']"
@@ -77,7 +81,45 @@ class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
         }
     }
 
-    @Suppress("UNCHECKED_CAST")
+    private fun collectTranslations(bundle: MsgBundle): Map<KClass<*>, Any> {
+        val translations = MsgTranslations()
+        bundle.register(translations)
+        return translations.instances
+    }
+
+    private fun restoreBundle(bundle: MsgBundle) {
+        val instances = collectTranslations(bundle)
+        val registrationsForLocale = registrations.getValue(bundle.locale)
+        check(registrationsForLocale.all { (clazz, registration) ->
+            registration !is BundleRegistration || registration.bundle !== bundle || clazz in instances
+        }) {
+            "Bundle must recreate its registered translation types [locale='${bundle.locale.languageTag}']"
+        }
+        instances.forEach { (clazz, instance) ->
+            val registration = registrationsForLocale[clazz] as? BundleRegistration
+            if (registration?.bundle === bundle) {
+                registration.instance = instance
+            }
+        }
+    }
+
+    @JvmName("registerMapperSameType")
+    inline fun <reified T : Any> registerMapper(
+        locale: MsgLocale? = null,
+        sourceLocale: MsgLocale? = null,
+        noinline registration: (T) -> T,
+    ) {
+        registerMapper(T::class, T::class, locale, sourceLocale, registration)
+    }
+
+    inline fun <reified S : Any, reified T : Any> registerMapper(
+        locale: MsgLocale? = null,
+        sourceLocale: MsgLocale? = null,
+        noinline registration: (S) -> T,
+    ) {
+        registerMapper(S::class, T::class, locale, sourceLocale, registration)
+    }
+
     fun <S : Any, T : Any> registerMapper(
         sourceClass: KClass<S>,
         targetClass: KClass<T>,
@@ -85,19 +127,19 @@ class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
         sourceLocale: MsgLocale? = null,
         registration: (S) -> T,
     ) {
-        val registrationsForLocale = mapperRegistrations.getOrPut(locale) { mutableMapOf() }
-        check(targetClass !in registrationsForLocale) {
-            "Duplicate base mapper [translationClass='${targetClass.simpleName}', locale='${locale?.languageTag ?: "global"}']"
-        }
-        registrationsForLocale[targetClass] = MapperRegistration(
-            sourceClass = sourceClass,
-            sourceLocale = sourceLocale,
-            registration = { source -> registration(source as S) },
-        )
-        revision += 1
+        val declarations = MsgRegistration()
+        declarations.registerMapper(sourceClass, targetClass, locale, sourceLocale, registration)
+        applyRegistration(declarations)
     }
 
-    @Suppress("UNCHECKED_CAST")
+    inline fun <reified S : Any, reified T : Any> registerMapper(
+        locale: MsgLocale? = null,
+        sourceLocale: MsgLocale? = null,
+        noinline registration: (S, T) -> T,
+    ) {
+        registerMapper(S::class, T::class, locale, sourceLocale, registration)
+    }
+
     fun <S : Any, T : Any> registerMapper(
         sourceClass: KClass<S>,
         targetClass: KClass<T>,
@@ -105,16 +147,9 @@ class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
         sourceLocale: MsgLocale? = null,
         registration: (S, T) -> T,
     ) {
-        val registrationsForLocale = overrideRegistrations.getOrPut(locale) { mutableMapOf() }
-        check(targetClass !in registrationsForLocale) {
-            "Duplicate override mapper [translationClass='${targetClass.simpleName}', locale='${locale?.languageTag ?: "global"}']"
-        }
-        registrationsForLocale[targetClass] = OverrideRegistration(
-            sourceClass = sourceClass,
-            sourceLocale = sourceLocale,
-            registration = { source, target -> registration(source as S, target as T) },
-        )
-        revision += 1
+        val declarations = MsgRegistration()
+        declarations.registerMapper(sourceClass, targetClass, locale, sourceLocale, registration)
+        applyRegistration(declarations)
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -239,8 +274,18 @@ class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
     }
 
     private fun ensureLocaleRegistered(locale: MsgLocale) {
+        val pending = pendingBundles[locale] ?: return
+        while (pending.isNotEmpty()) {
+            val bundle = pending.first()
+            val instances = collectTranslations(bundle)
+            val registrationsForLocale = registrations.getOrPut(locale) { mutableMapOf() }
+            instances.forEach { (clazz, instance) ->
+                registrationsForLocale[clazz] = BundleRegistration(bundle, instance)
+                revision += 1
+            }
+            pending.removeFirst()
+        }
         pendingBundles.remove(locale)
-            ?.forEach { bundle -> bundle.register(this) }
     }
 
     private fun fallbackLocales(locale: MsgLocale): List<MsgLocale> {
@@ -257,22 +302,10 @@ class PolyglotRegistry(msgAggregates: List<MsgAggregate> = emptyList()) {
 
     private class BundleRegistration(val bundle: MsgBundle, var instance: Any?) : TranslationRegistration
 
-    private data class MapperRegistration(
-        val sourceClass: KClass<*>,
-        val sourceLocale: MsgLocale?,
-        val registration: (Any) -> Any,
-    )
-
     private data class ResolutionKey(
         val clazz: KClass<*>,
         val locale: MsgLocale,
         val phase: ResolutionPhase,
-    )
-
-    private data class OverrideRegistration(
-        val sourceClass: KClass<*>,
-        val sourceLocale: MsgLocale?,
-        val registration: (Any, Any) -> Any,
     )
 
     private enum class ResolutionPhase {

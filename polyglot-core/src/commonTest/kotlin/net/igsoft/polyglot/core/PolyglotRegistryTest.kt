@@ -104,9 +104,11 @@ class PolyglotRegistryTest {
     @Test
     fun `Given localized and global mappers when resolving translation then localized mapper wins regardless of registration order`() {
         // Given
-        val localizedMapper = object : MsgMapper() {
-            override fun register() {
-                add<RegistryCommonStrings, RegistryTargetStrings>(
+        val localizedMapper = object : MsgAggregate() {
+            override fun register(registration: MsgRegistration) {
+                registration.registerMapper(
+                    RegistryCommonStrings::class,
+                    RegistryTargetStrings::class,
                     locale = MsgLocales.EN,
                     sourceLocale = MsgLocales.PL,
                 ) { strings ->
@@ -345,42 +347,42 @@ private data class RegistryAuxiliaryStrings(
 )
 
 private class RegistryBundleAggregate : MsgAggregate() {
-    override fun register() {
-        addBundle(RegistryBundleEn())
-        addBundle(RegistryBundlePl())
+    override fun register(registration: MsgRegistration) {
+        registration.registerBundle(RegistryBundleEn())
+        registration.registerBundle(RegistryBundlePl())
     }
 }
 
 private class RegistryLazyAggregate(
     private val counters: RegistryTranslationCounters,
 ) : MsgAggregate() {
-    override fun register() {
-        addBundle(RegistryLazyBundleEn(counters))
-        addBundle(RegistryLazyBundlePl(counters))
+    override fun register(registration: MsgRegistration) {
+        registration.registerBundle(RegistryLazyBundleEn(counters))
+        registration.registerBundle(RegistryLazyBundlePl(counters))
     }
 }
 
 private class RegistryMapperAggregate(
-    private vararg val msgAggregates: MsgAggregate,
+    private vararg val definitions: MsgDefinition,
 ) : MsgAggregate() {
-    override fun register() {
-        msgAggregates.forEach(::addBundle)
+    override fun register(registration: MsgRegistration) {
+        definitions.forEach(registration::registerBundle)
     }
 }
 
 private class RegistryBundleEn : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.EN
 
-    override fun register() {
-        add(RegistryStrings(label = "English"))
+    override fun register(translations: MsgTranslations) {
+        translations.add(RegistryStrings(label = "English"))
     }
 }
 
 private class RegistryBundlePl : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.PL
 
-    override fun register() {
-        add(RegistryStrings(label = "Polish"))
+    override fun register(translations: MsgTranslations) {
+        translations.add(RegistryStrings(label = "Polish"))
     }
 }
 
@@ -389,9 +391,9 @@ private class RegistryLazyBundleEn(
 ) : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.EN
 
-    override fun register() {
+    override fun register(translations: MsgTranslations) {
         counters.englishBundleRegistrationCount += 1
-        add(RegistryStrings(label = "English"))
+        translations.add(RegistryStrings(label = "English"))
     }
 }
 
@@ -400,17 +402,17 @@ private class RegistryLazyBundlePl(
 ) : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.PL
 
-    override fun register() {
+    override fun register(translations: MsgTranslations) {
         counters.polishBundleRegistrationCount += 1
-        add(RegistryStrings(label = "Polish"))
+        translations.add(RegistryStrings(label = "Polish"))
     }
 }
 
 private class RegistryCommonBundleEn : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.EN
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             RegistryCommonStrings(
                 clear = "Clear",
                 back = "Back",
@@ -422,8 +424,8 @@ private class RegistryCommonBundleEn : MsgBundle() {
 private class RegistryCommonBundlePl : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.PL
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             RegistryCommonStrings(
                 clear = "Wyczyść",
                 back = "Wróć",
@@ -435,8 +437,8 @@ private class RegistryCommonBundlePl : MsgBundle() {
 private class RegistryTargetBundleEn : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.EN
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             RegistryTargetStrings(
                 clear = "Dismiss",
                 back = "Navigate up",
@@ -448,8 +450,8 @@ private class RegistryTargetBundleEn : MsgBundle() {
 private class RegistryTargetBundlePlPl : MsgBundle() {
     override val locale: MsgLocale = MsgLocales.PL_PL
 
-    override fun register() {
-        add(
+    override fun register(translations: MsgTranslations) {
+        translations.add(
             RegistryTargetStrings(
                 clear = "Wyczyść (Polska)",
                 back = "Wróć (Polska)",
@@ -458,9 +460,9 @@ private class RegistryTargetBundlePlPl : MsgBundle() {
     }
 }
 
-private class RegistryTargetMapper : MsgMapper() {
-    override fun register() {
-        add<RegistryCommonStrings, RegistryTargetStrings> { strings ->
+private class RegistryTargetMapper : MsgAggregate() {
+    override fun register(registration: MsgRegistration) {
+        registration.registerMapper(RegistryCommonStrings::class, RegistryTargetStrings::class) { strings ->
             RegistryTargetStrings(
                 clear = strings.clear,
                 back = strings.back,
