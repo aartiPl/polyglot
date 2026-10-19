@@ -1,0 +1,23 @@
+[versions]
+kotlinVersion = "2.4.21"
+composeCompilerVersion = "2.4.21"
+agpVersion = "9.3.3"
+testLoggerVersion = "4.0.0"
+mavenPublishVersion = "0.37.0"
+atomicfuVersion = "0.33.0"
+composeVersion = "1.12.2"
+test-assertkVersion = "0.28.1"
+
+[plugins]
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlinVersion" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "composeCompilerVersion" }
+android-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agpVersion" }
+test-logger = { id = "com.adarshr.test-logger", version.ref = "testLoggerVersion" }
+maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublishVersion" }
+
+[libraries]
+atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "atomicfuVersion" }
+compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "composeVersion" }
+compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "composeVersion" }
+test-assertk = { module = "com.willowtreeapps.assertk:assertk", version.ref = "test-assertkVersion" }
+test-junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }

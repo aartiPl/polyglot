@@ -1,8 +1,8 @@
 plugins {
-    kotlin("multiplatform")
-    id("com.android.kotlin.multiplatform.library")
-    id("com.adarshr.test-logger")
-    id("com.vanniktech.maven.publish")
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.android.multiplatform.library)
+    alias(libs.plugins.test.logger)
+    alias(libs.plugins.maven.publish)
 }
 
 kotlin {
@@ -22,17 +22,17 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation("org.jetbrains.kotlinx:atomicfu:0.33.0")
+            implementation(libs.atomicfu)
         }
 
         commonTest.dependencies {
             implementation(kotlin("test"))
-            implementation("com.willowtreeapps.assertk:assertk:0.28.1")
+            implementation(libs.test.assertk)
         }
 
         jvmTest.dependencies {
             implementation(kotlin("test-junit5"))
-            runtimeOnly("org.junit.platform:junit-platform-launcher")
+            runtimeOnly(libs.test.junit.platform.launcher)
         }
     }
 }

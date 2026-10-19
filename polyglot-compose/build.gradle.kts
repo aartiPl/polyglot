@@ -1,9 +1,9 @@
 plugins {
-    kotlin("multiplatform")
-    id("com.android.kotlin.multiplatform.library")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("com.adarshr.test-logger")
-    id("com.vanniktech.maven.publish")
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.android.multiplatform.library)
+    alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.test.logger)
+    alias(libs.plugins.maven.publish)
 }
 
 kotlin {
@@ -26,13 +26,13 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":polyglot-core"))
-            api("org.jetbrains.compose.runtime:runtime:1.11.1")
-            api("org.jetbrains.compose.ui:ui:1.11.1")
+            api(libs.compose.runtime)
+            api(libs.compose.ui)
         }
 
         jvmTest.dependencies {
             implementation(kotlin("test-junit5"))
-            runtimeOnly("org.junit.platform:junit-platform-launcher")
+            runtimeOnly(libs.test.junit.platform.launcher)
         }
     }
 }

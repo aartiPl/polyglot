@@ -1,11 +1,11 @@
 import org.gradle.api.tasks.testing.Test
 
 plugins {
-    kotlin("multiplatform") version "2.4.0" apply false
-    id("org.jetbrains.kotlin.plugin.compose") version "2.4.10" apply false
-    id("com.android.kotlin.multiplatform.library") version "9.1.1" apply false
-    id("com.adarshr.test-logger") version "4.0.0" apply false
-    id("com.vanniktech.maven.publish") version "0.37.0" apply false
+    alias(libs.plugins.kotlin.multiplatform) apply false
+    alias(libs.plugins.compose.compiler) apply false
+    alias(libs.plugins.android.multiplatform.library) apply false
+    alias(libs.plugins.test.logger) apply false
+    alias(libs.plugins.maven.publish) apply false
     idea
 }
 
