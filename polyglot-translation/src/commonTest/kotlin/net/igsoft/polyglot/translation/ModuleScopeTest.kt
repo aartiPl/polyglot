@@ -13,7 +13,7 @@ class ModuleScopeTest {
         val registry = Registry()
         val aggregate = object : Module() {
             override fun register(registration: ModuleScope) {
-                registration.registerBundle(bundle())
+                registration.registerDefinition(bundle())
                 registration.registerMapper(Source::class, Target::class) { source -> Target(source.value) }
                 registration.registerMapper(Source::class, Target::class) { source: Source, target: Target ->
                     target.copy(value = source.value)
@@ -22,7 +22,7 @@ class ModuleScopeTest {
             }
         }
 
-        assertFailsWith<IllegalStateException> { registry.registerBundle(aggregate) }
+        assertFailsWith<IllegalStateException> { registry.registerDefinition(aggregate) }
 
         assertEquals(emptySet(), registry.registeredLocales())
         assertEquals(0L, registry.revision)
@@ -41,12 +41,12 @@ class ModuleScopeTest {
         }
         val parent = object : Module() {
             override fun register(registration: ModuleScope) {
-                registration.registerBundle(bundle())
-                registration.registerBundle(child)
+                registration.registerDefinition(bundle())
+                registration.registerDefinition(child)
             }
         }
 
-        assertFailsWith<IllegalStateException> { registry.registerBundle(parent) }
+        assertFailsWith<IllegalStateException> { registry.registerDefinition(parent) }
 
         assertEquals(emptySet(), registry.registeredLocales())
         assertEquals(0L, registry.revision)
@@ -57,16 +57,20 @@ class ModuleScopeTest {
         val registry = Registry()
         val aggregate = object : Module() {
             override fun register(registration: ModuleScope) {
-                registration.registerBundle(bundle())
+                registration.registerDefinition(bundle())
                 repeat(2) {
                     registration.registerMapper(Source::class, Target::class) { source -> Target(source.value) }
                 }
             }
         }
 
-        val exception = assertFailsWith<IllegalStateException> { registry.registerBundle(aggregate) }
+        val exception = assertFailsWith<IllegalStateException> { registry.registerDefinition(aggregate) }
 
-        assertEquals("Duplicate base mapper [translationClass='Target', locale='global']", exception.message)
+        assertEquals(
+            "Duplicate base mapper [translationClass='Target', locale='global'] " +
+                "[existing='Registry/Module#1/base#2', incoming='Registry/Module#1/base#3']",
+            exception.message,
+        )
         assertEquals(emptySet(), registry.registeredLocales())
         assertEquals(0L, registry.revision)
     }
@@ -81,13 +85,13 @@ class ModuleScopeTest {
         val revision = registry.revision
         val aggregate = object : Module() {
             override fun register(registration: ModuleScope) {
-                registration.registerBundle(bundle(Locales.PL))
+                registration.registerDefinition(bundle(Locales.PL))
                 registration.registerMapper(Target::class, Source::class) { target -> Source(target.value) }
                 registration.registerMapper(Source::class, Target::class) { _: Source, target: Target -> target }
             }
         }
 
-        assertFailsWith<IllegalStateException> { registry.registerBundle(aggregate) }
+        assertFailsWith<IllegalStateException> { registry.registerDefinition(aggregate) }
 
         assertEquals(setOf(Locales.EN), registry.registeredLocales())
         assertEquals(revision, registry.revision)
@@ -100,7 +104,7 @@ class ModuleScopeTest {
         val registry = Registry()
         val child = object : Module() {
             override fun register(registration: ModuleScope) {
-                registration.registerBundle(bundle(Locales.PL))
+                registration.registerDefinition(bundle(Locales.PL))
                 registration.registerMapper(Target::class, Source::class) { target -> Source(target.value) }
                 registration.registerMapper(Source::class, Target::class) { source -> Target(source.value) }
             }
@@ -108,12 +112,12 @@ class ModuleScopeTest {
         val parent = object : Module() {
             override fun register(registration: ModuleScope) {
                 registration.registerMapper(Source::class, Target::class) { source -> Target(source.value) }
-                assertFailsWith<IllegalStateException> { registration.registerBundle(child) }
-                registration.registerBundle(bundle())
+                assertFailsWith<IllegalStateException> { registration.registerDefinition(child) }
+                registration.registerDefinition(bundle())
             }
         }
 
-        registry.registerBundle(parent)
+        registry.registerDefinition(parent)
 
         assertEquals(setOf(Locales.EN), registry.registeredLocales())
         assertEquals("Source", Resolver(registry).getTranslationClass(Target::class).value)
@@ -126,7 +130,7 @@ class ModuleScopeTest {
         val aggregate = object : Module() {
             override fun register(registration: ModuleScope) {
                 collector = registration
-                registration.registerBundle(bundle())
+                registration.registerDefinition(bundle())
                 registration.registerMapper(Source::class, Target::class, locale = Locales.EN) { source ->
                     Target(source.value)
                 }
@@ -135,7 +139,7 @@ class ModuleScopeTest {
         val registry = Registry(listOf(aggregate))
         val revision = registry.revision
 
-        collector.registerBundle(bundle(Locales.PL))
+        collector.registerDefinition(bundle(Locales.PL))
         collector.registerMapper(Target::class, Source::class, locale = Locales.EN) { target -> Source(target.value) }
 
         assertEquals(setOf(Locales.EN), registry.registeredLocales())

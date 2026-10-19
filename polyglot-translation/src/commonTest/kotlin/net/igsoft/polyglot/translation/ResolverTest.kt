@@ -93,7 +93,7 @@ class ResolverTest {
         // Given
         val repositoryTranslations = RepositoryAggregate()
         val polyglotRegistry = Registry()
-        polyglotRegistry.registerBundle(repositoryTranslations)
+        polyglotRegistry.registerDefinition(repositoryTranslations)
         val polyglotResolver = Resolver(polyglotRegistry)
 
         // When
@@ -335,14 +335,14 @@ private data class RecursiveTargetStrings(
 
 private class RepositoryAggregate : Module() {
     override fun register(registration: ModuleScope) {
-        registration.registerBundle(RepositoryBundlePl())
-        registration.registerBundle(RepositoryBundleEn())
+        registration.registerDefinition(RepositoryBundlePl())
+        registration.registerDefinition(RepositoryBundleEn())
     }
 }
 
 private class RegionalRepositoryAggregate : Module() {
     override fun register(registration: ModuleScope) {
-        registration.registerBundle(RegionalRepositoryBundleUs())
+        registration.registerDefinition(RegionalRepositoryBundleUs())
     }
 }
 
@@ -350,7 +350,7 @@ private class NonStandardLocaleAggregate(
     private val locale: Locale,
 ) : Module() {
     override fun register(registration: ModuleScope) {
-        registration.registerBundle(NonStandardLocaleBundle(locale))
+        registration.registerDefinition(NonStandardLocaleBundle(locale))
     }
 }
 
@@ -358,7 +358,7 @@ private class MapperAggregate(
     private vararg val definitions: Definition,
 ) : Module() {
     override fun register(registration: ModuleScope) {
-        definitions.forEach(registration::registerBundle)
+        definitions.forEach(registration::registerDefinition)
     }
 }
 
@@ -465,8 +465,8 @@ private class SearchFieldMapper : Module() {
 
 private class CyclicMapperAggregate : Module() {
     override fun register(registration: ModuleScope) {
-        registration.registerBundle(RecursiveSourceMapper())
-        registration.registerBundle(RecursiveTargetMapper())
+        registration.registerDefinition(RecursiveSourceMapper())
+        registration.registerDefinition(RecursiveTargetMapper())
     }
 }
 
@@ -503,8 +503,8 @@ private class LazyRepositoryAggregate(
     private val counters: TranslationCounters,
 ) : Module() {
     override fun register(registration: ModuleScope) {
-        registration.registerBundle(LazyRepositoryBundleEn(counters))
-        registration.registerBundle(LazyRepositoryBundlePl(counters))
+        registration.registerDefinition(LazyRepositoryBundleEn(counters))
+        registration.registerDefinition(LazyRepositoryBundlePl(counters))
     }
 }
 

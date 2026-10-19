@@ -191,14 +191,14 @@ class SearchBundlePl : Bundle() {
 
 class SearchModule : Module() {
     override fun register(registration: ModuleScope) {
-        registration.registerBundle(SearchBundleEn())
-        registration.registerBundle(SearchBundlePl())
+        registration.registerDefinition(SearchBundleEn())
+        registration.registerDefinition(SearchBundlePl())
     }
 }
 
 class AppModule : Module() {
     override fun register(registration: ModuleScope) {
-        registration.registerBundle(SearchModule())
+        registration.registerDefinition(SearchModule())
     }
 }
 
@@ -286,7 +286,7 @@ This makes bundles a good fit for leaf-level module translations.
 - it does not represent one locale by itself,
 - it is the main tool for building module-level and app-level translation trees.
 
-Implement `register(registration: ModuleScope)` and add definitions with `registration.registerBundle(...)`.
+Implement `register(registration: ModuleScope)` and add definitions with `registration.registerDefinition(...)`.
 Bundles and modules implement `Definition`; use this type for mixed collections of definitions.
 The registry applies the collected declarations after the entire module tree registers successfully and mapper duplicates are validated.
 Bundle models remain lazy. Keep the collector local to `register()`; later additions do not update the registry.
@@ -461,6 +461,18 @@ Application override behavior:
 - skip an override when its source is missing; a missing component base remains a missing translation error,
 - register at most one mapper per role (base or override), target type and locale; duplicate registrations fail.
 
+Duplicate mapper errors include both registration paths, for example:
+
+```text
+Duplicate base mapper [translationClass='AccountStrings', locale='global'] [existing='Registry/SharedModule#1/base#1', incoming='Registry/AppModule#2/SharedModule#1/base#1']
+```
+
+Paths identify the complete module hierarchy. Numbers identify declaration attempts within the owning scope,
+including failed attempts. Anonymous definitions use `Module` or `Bundle` as their name.
+Direct registry mappers use `Registry/mapper#N/base#1` or `Registry/mapper#N/override#1`.
+Registration validates conflicts before publishing the collected declarations; a rejected module leaves existing
+registrations, cached results and the registry revision unchanged.
+
 Source bundles are registered lazily, including sources outside the requested locale's fallback chain.
 Keep transformations immutable, for example with `copy()`, so the base translation remains unchanged.
 Localized mapper target locales are included in `registeredLocales()`.
@@ -472,7 +484,7 @@ Localized mapper target locales are included in `registeredLocales()`.
 Key behaviors:
 
 - accepts top-level `Definition` values in the constructor,
-- supports incremental registration through `registerBundle(...)`,
+- supports incremental registration through `registerDefinition(...)`,
 - supports direct factories through `registerTranslationClass<T>(locale) { ... }` or the overload accepting `KClass<T>`,
 - keeps locale bundles pending and registers them lazily on first use,
 - retains each effective bundle translation's owner so released models can be rebuilt without changing registration precedence,
@@ -510,6 +522,87 @@ Behavior:
 Releasing bundle models preserves translation definitions, mapper definitions and directly registered factories.
 Other resolvers sharing the registry retain their cached results until their own cache is invalidated.
 Models still referenced by application code or another resolver remain reachable; GC can reclaim them after those references are released.
+
+### Translation diagnostics
+
+Use `DiagnosticResolver` when translation provenance is needed. Pass its `resolver` to the application,
+including `AppLocalizationProvider`, so ordinary and diagnostic lookups share the same cache:
+
+```kotlin
+import net.igsoft.polyglot.translation.DiagnosticResolver
+
+val diagnostics = DiagnosticResolver(Registry(listOf(AppModule())))
+val resolver = diagnostics.resolver
+resolver.setCurrentLocale(Locales.PT_BR)
+
+val strings = resolver.getTranslationClass<AccountStrings>()
+val result = diagnostics.resolve<AccountStrings>()
+check(result.value === strings)
+check(result.diagnostics.cacheHit)
+
+val explicit = diagnostics.resolve(AccountStrings::class, Locales.PT_BR)
+println(explicit.diagnostics)
+```
+
+`resolve<T>()` uses the resolver's current locale; `resolve<T>(locale)` uses an explicit locale.
+Both have equivalents accepting `KClass<T>`. Each returns `TranslationResolution<T>` containing the actual
+`value` and a `TranslationDiagnostics` snapshot:
+
+- `requestedClass`, `requestedLocale` and `fallbackChain` identify the request and ordered fallback candidates,
+- `cacheHit` identifies whether this lookup reused a final model from this resolver's cache,
+- `usesEnglishFallback` identifies selection of the default `en` candidate for the target or an implicit override source,
+- `origin` describes the successful dependency tree through the sealed `TranslationOrigin` type.
+
+The origin variants are:
+
+| Variant | Provenance |
+| --- | --- |
+| `BundleOrigin` | Model type, actual locale, bundle class and registration path. |
+| `FactoryOrigin` | Model type, actual locale and direct factory registration path. |
+| `BaseMapperOrigin` | Target model type, `resolvedLocale`, declared target `locale` (`null` for global), declared `sourceLocale`, registration path and resolved `source`. |
+| `OverrideOrigin` | Target model type, declared target `locale`, declared `sourceLocale`, registration path, previous `target` and independently resolved `source`. |
+
+For regional inheritance the tree preserves both locales:
+
+```text
+requested: AccountStrings, pt-BR; fallbackChain: [pt-BR, pt, en]
+BaseMapperOrigin(locale=pt-BR, resolvedLocale=pt-BR, sourceLocale=pt)
+└─ BundleOrigin(locale=pt, bundleClass=AccountBundlePt)
+```
+
+An override adds separate `target` and `source` branches. Nested overrides remain in those branches.
+Base conversions retain source bases without application overrides, following ordinary resolution semantics.
+Explicit `sourceLocale` selects exactly that locale, including sources outside `fallbackChain`.
+An explicit English source and language fallback `en-US -> en` do not set `usesEnglishFallback`.
+Sources outside the request chain remain visible in the tree.
+
+Diagnostics use the ordinary resolution algorithm and record provenance during the lookup that creates the value.
+Cache hits reuse its recorded origin without invoking bundles, factories or mappers again.
+Registry changes invalidate values and provenance together on the next lookup. Changing the current locale clears
+both caches and releases bundle models under the ordinary lifecycle rules. Other resolvers sharing the registry
+retain their own cached values and provenance. Previously returned reports remain historical snapshots.
+
+`Resolver(registry)` allocates no diagnostic cache, traces or origin trees. The shared resolution path checks for
+an optional trace. Registration paths are retained by every registry to explain duplicate mapper errors.
+`DiagnosticResolver` adds trace work on cache misses and retains an origin tree per cached result, proportional
+to its successful dependency occurrences. Diagnostic cache hits allocate only the result and report wrappers;
+they reuse the origin tree. Reports retain class identifiers, locale values and paths, without retaining model
+instances, definition instances or registration callbacks. `TranslationResolution.value` retains the returned model
+like an ordinary lookup result.
+
+Reports describe applied transformations, rather than all rejected candidates or individual field values.
+Missing translations, cycles and callback failures retain ordinary exception behavior; failed lookups are not cached.
+Create a `DiagnosticResolver` before reproducing an issue: provenance cannot be reconstructed from a cache
+created by an independent ordinary resolver.
+
+### Registration API migration
+
+Replace `Registry.registerBundle(definition)` and `ModuleScope.registerBundle(definition)` with
+`registerDefinition(definition)`, including callable references such as `registration::registerDefinition`.
+The parameter remains `Definition` and accepts both bundles and modules. `BundleScope.add(...)`, constructor
+registration, mapper precedence, fallback rules and Compose APIs keep their existing contracts.
+The old method is removed without a compatibility wrapper; consumers must recompile against the updated API.
+The working version remains `0.4.0` for local development; publish these incompatible changes under a new version.
 
 ## Example: command line application
 

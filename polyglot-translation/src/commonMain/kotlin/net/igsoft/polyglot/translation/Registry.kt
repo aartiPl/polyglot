@@ -8,23 +8,25 @@ class Registry(definitions: List<Definition> = emptyList()) {
     private val registrations = mutableMapOf<Locale, MutableMap<KClass<*>, TranslationRegistration>>()
     private val mapperRegistrations = mutableMapOf<Locale?, MutableMap<KClass<*>, MapperRegistration>>()
     private val overrideRegistrations = mutableMapOf<Locale?, MutableMap<KClass<*>, OverrideRegistration>>()
-    private val pendingBundles = mutableMapOf<Locale, ArrayDeque<Bundle>>()
+    private val pendingBundles = mutableMapOf<Locale, ArrayDeque<BundleDeclaration>>()
+    private var declarationSequence = 0
 
     internal var revision: Long = 0
         private set
 
     init {
-        definitions.forEach { registerBundle(it) }
+        definitions.forEach { registerDefinition(it) }
     }
 
-    fun registerBundle(definition: Definition) {
+    fun registerDefinition(definition: Definition) {
+        val path = nextPath(definition::class.simpleName ?: if (definition is Bundle) "Bundle" else "Module")
         when (definition) {
             is Bundle -> {
-                pendingBundles.getOrPut(definition.locale) { ArrayDeque() }.addLast(definition)
+                pendingBundles.getOrPut(definition.locale) { ArrayDeque() }.addLast(BundleDeclaration(definition, path))
                 revision += 1
             }
             is Module -> {
-                val registration = ModuleScope()
+                val registration = ModuleScope(path)
                 definition.register(registration)
                 applyRegistration(registration)
             }
@@ -33,8 +35,8 @@ class Registry(definitions: List<Definition> = emptyList()) {
 
     private fun applyRegistration(registration: ModuleScope) {
         registration.validateAgainst(mapperRegistrations, overrideRegistrations)
-        registration.bundles.forEach { bundle ->
-            pendingBundles.getOrPut(bundle.locale) { ArrayDeque() }.addLast(bundle)
+        registration.bundles.forEach { declaration ->
+            pendingBundles.getOrPut(declaration.bundle.locale) { ArrayDeque() }.addLast(declaration)
             revision += 1
         }
         registration.mappers.forEach { (locale, entries) ->
@@ -56,7 +58,7 @@ class Registry(definitions: List<Definition> = emptyList()) {
             mutableMapOf()
         }
 
-        registrationsForLocale[clazz] = DirectRegistration(registration)
+        registrationsForLocale[clazz] = DirectRegistration(registration, nextPath("factory"))
         revision += 1
     }
 
@@ -128,7 +130,7 @@ class Registry(definitions: List<Definition> = emptyList()) {
         sourceLocale: Locale? = null,
         registration: (S) -> T,
     ) {
-        val declarations = ModuleScope()
+        val declarations = ModuleScope(nextPath("mapper"))
         declarations.registerMapper(sourceClass, targetClass, locale, sourceLocale, registration)
         applyRegistration(declarations)
     }
@@ -148,18 +150,24 @@ class Registry(definitions: List<Definition> = emptyList()) {
         sourceLocale: Locale? = null,
         registration: (S, T) -> T,
     ) {
-        val declarations = ModuleScope()
+        val declarations = ModuleScope(nextPath("mapper"))
         declarations.registerMapper(sourceClass, targetClass, locale, sourceLocale, registration)
         applyRegistration(declarations)
     }
 
     @Suppress("UNCHECKED_CAST")
-    internal fun <T : Any> getTranslationClass(clazz: KClass<T>, locales: List<Locale>): T {
+    internal fun <T : Any> getTranslationClass(
+        clazz: KClass<T>,
+        locales: List<Locale>,
+        trace: ResolutionTrace? = null,
+    ): T {
         val fallbackLocales = locales.flatMap(::fallbackLocales).distinct()
+        trace?.fallbackChain = fallbackLocales
         return resolveTranslationClassOrNull(
             clazz = clazz,
             locales = fallbackLocales,
             resolutionStack = emptyList(),
+            trace = trace,
         ) as? T
             ?: error(
                 "Can not find translations for locales: [${fallbackLocales.joinToString(", ") { it.languageTag }}] " +
@@ -171,43 +179,63 @@ class Registry(definitions: List<Definition> = emptyList()) {
         clazz: KClass<*>,
         locales: List<Locale>,
         resolutionStack: List<ResolutionKey>,
+        trace: ResolutionTrace?,
     ): Any? {
-        var translation = resolveBaseTranslationClassOrNull(clazz, locales, resolutionStack) ?: return null
+        var translation = resolveBaseTranslationClassOrNull(clazz, locales, resolutionStack, trace) ?: return null
         val resolutionKey = ResolutionKey(clazz, locales.first(), ResolutionPhase.FINAL)
         checkResolutionCycle(resolutionKey, resolutionStack)
         val nextStack = resolutionStack + resolutionKey
 
         overrideRegistrations[null]?.get(clazz)?.let { overrideRegistration ->
-            translation = resolveOverrideOrNull(overrideRegistration, translation, locales, nextStack) ?: translation
+            translation = resolveOverrideOrNull(clazz, overrideRegistration, translation, locales, nextStack, trace) ?: translation
         }
         locales.forEach { locale ->
             val overrideRegistration = overrideRegistrations[locale]?.get(clazz) ?: return@forEach
-            resolveOverrideOrNull(overrideRegistration, translation, locales, nextStack)?.let { return it }
+            resolveOverrideOrNull(clazz, overrideRegistration, translation, locales, nextStack, trace)?.let { return it }
         }
 
         return translation
     }
 
     private fun resolveOverrideOrNull(
+        clazz: KClass<*>,
         overrideRegistration: OverrideRegistration,
         translation: Any,
         locales: List<Locale>,
         resolutionStack: List<ResolutionKey>,
+        trace: ResolutionTrace?,
     ): Any? {
         val sourceLocales = overrideRegistration.sourceLocale?.let(::listOf) ?: locales
+        val sourceTrace = trace?.let {
+            ResolutionTrace(if (overrideRegistration.sourceLocale == null) it.defaultFallback else null)
+        }
         val source = resolveTranslationClassOrNull(
             overrideRegistration.sourceClass,
             sourceLocales,
             resolutionStack,
+            sourceTrace,
         ) ?: return null
 
-        return overrideRegistration.registration(source, translation)
+        val result = overrideRegistration.registration(source, translation)
+        if (trace != null) {
+            trace.origin = OverrideOrigin(
+                translationClass = clazz,
+                locale = overrideRegistration.locale,
+                sourceLocale = overrideRegistration.sourceLocale,
+                registrationPath = overrideRegistration.registrationPath,
+                target = checkNotNull(trace.origin),
+                source = checkNotNull(sourceTrace?.origin),
+            )
+            trace.usesEnglishFallback = trace.usesEnglishFallback || sourceTrace.usesEnglishFallback
+        }
+        return result
     }
 
     private fun resolveBaseTranslationClassOrNull(
         clazz: KClass<*>,
         locales: List<Locale>,
         resolutionStack: List<ResolutionKey>,
+        trace: ResolutionTrace?,
     ): Any? {
         ensureLocalesRegistered(locales)
         locales.forEach { locale ->
@@ -215,12 +243,24 @@ class Registry(definitions: List<Definition> = emptyList()) {
                 clazz = clazz,
                 locale = locale,
                 resolutionStack = resolutionStack,
+                trace = trace,
             )?.let { translation ->
+                if (trace != null && locale == trace.defaultFallback) {
+                    trace.usesEnglishFallback = true
+                }
                 return translation
             }
 
             registrations[locale]?.get(clazz)?.let { registration ->
-                return resolveRegistration(registration)
+                val translation = resolveRegistration(registration)
+                if (trace != null) {
+                    trace.origin = when (registration) {
+                        is BundleRegistration -> BundleOrigin(clazz, locale, registration.bundle::class, registration.registrationPath)
+                        is DirectRegistration -> FactoryOrigin(clazz, locale, registration.registrationPath)
+                    }
+                    trace.usesEnglishFallback = locale == trace.defaultFallback
+                }
+                return translation
             }
         }
 
@@ -231,6 +271,7 @@ class Registry(definitions: List<Definition> = emptyList()) {
         clazz: KClass<*>,
         locale: Locale,
         resolutionStack: List<ResolutionKey>,
+        trace: ResolutionTrace?,
     ): Any? {
         val candidates = listOfNotNull(
             mapperRegistrations[locale]?.get(clazz),
@@ -243,13 +284,27 @@ class Registry(definitions: List<Definition> = emptyList()) {
         checkResolutionCycle(resolutionKey, resolutionStack)
         candidates.forEach { mapperRegistration ->
             val sourceLocale = mapperRegistration.sourceLocale ?: locale
+            val sourceTrace = trace?.let { ResolutionTrace(null) }
             val sourceTranslation = resolveBaseTranslationClassOrNull(
                 clazz = mapperRegistration.sourceClass,
                 locales = listOf(sourceLocale),
                 resolutionStack = resolutionStack + resolutionKey,
+                trace = sourceTrace,
             ) ?: return@forEach
 
-            return mapperRegistration.registration(sourceTranslation)
+            val translation = mapperRegistration.registration(sourceTranslation)
+            if (trace != null) {
+                trace.origin = BaseMapperOrigin(
+                    translationClass = clazz,
+                    resolvedLocale = locale,
+                    locale = mapperRegistration.locale,
+                    sourceLocale = mapperRegistration.sourceLocale,
+                    registrationPath = mapperRegistration.registrationPath,
+                    source = checkNotNull(sourceTrace?.origin),
+                )
+                trace.usesEnglishFallback = sourceTrace.usesEnglishFallback
+            }
+            return translation
         }
 
         return null
@@ -277,11 +332,12 @@ class Registry(definitions: List<Definition> = emptyList()) {
     private fun ensureLocaleRegistered(locale: Locale) {
         val pending = pendingBundles[locale] ?: return
         while (pending.isNotEmpty()) {
-            val bundle = pending.first()
+            val declaration = pending.first()
+            val bundle = declaration.bundle
             val instances = collectTranslations(bundle)
             val registrationsForLocale = registrations.getOrPut(locale) { mutableMapOf() }
             instances.forEach { (clazz, instance) ->
-                registrationsForLocale[clazz] = BundleRegistration(bundle, instance)
+                registrationsForLocale[clazz] = BundleRegistration(bundle, instance, declaration.registrationPath)
                 revision += 1
             }
             pending.removeFirst()
@@ -299,9 +355,18 @@ class Registry(definitions: List<Definition> = emptyList()) {
 
     private sealed interface TranslationRegistration
 
-    private class DirectRegistration(val registration: () -> Any) : TranslationRegistration
+    private class DirectRegistration(
+        val registration: () -> Any,
+        val registrationPath: String,
+    ) : TranslationRegistration
 
-    private class BundleRegistration(val bundle: Bundle, var instance: Any?) : TranslationRegistration
+    private class BundleRegistration(
+        val bundle: Bundle,
+        var instance: Any?,
+        val registrationPath: String,
+    ) : TranslationRegistration
+
+    private fun nextPath(name: String): String = "Registry/$name#${++declarationSequence}"
 
     private data class ResolutionKey(
         val clazz: KClass<*>,

@@ -15,7 +15,7 @@ class RegistryTest {
         // Given
         val counters = RegistryTranslationCounters()
         val registry = Registry()
-        registry.registerBundle(RegistryLazyAggregate(counters))
+        registry.registerDefinition(RegistryLazyAggregate(counters))
 
         // When
         val englishTranslation = registry.getTranslationClass(RegistryStrings::class, listOf(Locales.EN))
@@ -30,7 +30,7 @@ class RegistryTest {
     fun `Given bundle registered after registry creation when resolving translation then resolve incrementally registered bundle`() {
         // Given
         val registry = Registry()
-        registry.registerBundle(RegistryBundleEn())
+        registry.registerDefinition(RegistryBundleEn())
 
         // When
         val translation = registry.getTranslationClass(RegistryStrings::class, listOf(Locales.EN))
@@ -85,7 +85,7 @@ class RegistryTest {
     fun `Given pending bundles and direct registrations when listing locales then return all registered locales`() {
         // Given
         val registry = Registry()
-        registry.registerBundle(RegistryBundleAggregate())
+        registry.registerDefinition(RegistryBundleAggregate())
         registry.registerTranslationClass(Locales.EN_US, RegistryAuxiliaryStrings::class) {
             RegistryAuxiliaryStrings("Auxiliary US")
         }
@@ -350,8 +350,8 @@ private data class RegistryAuxiliaryStrings(
 
 private class RegistryBundleAggregate : Module() {
     override fun register(registration: ModuleScope) {
-        registration.registerBundle(RegistryBundleEn())
-        registration.registerBundle(RegistryBundlePl())
+        registration.registerDefinition(RegistryBundleEn())
+        registration.registerDefinition(RegistryBundlePl())
     }
 }
 
@@ -359,8 +359,8 @@ private class RegistryLazyAggregate(
     private val counters: RegistryTranslationCounters,
 ) : Module() {
     override fun register(registration: ModuleScope) {
-        registration.registerBundle(RegistryLazyBundleEn(counters))
-        registration.registerBundle(RegistryLazyBundlePl(counters))
+        registration.registerDefinition(RegistryLazyBundleEn(counters))
+        registration.registerDefinition(RegistryLazyBundlePl(counters))
     }
 }
 
@@ -368,7 +368,7 @@ private class RegistryMapperAggregate(
     private vararg val definitions: Definition,
 ) : Module() {
     override fun register(registration: ModuleScope) {
-        definitions.forEach(registration::registerBundle)
+        definitions.forEach(registration::registerDefinition)
     }
 }
 

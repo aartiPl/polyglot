@@ -109,7 +109,7 @@ class TranslationLifecycleTest {
             val registry = Registry(listOf(bundle(Locales.EN, calls)))
             val resolver = Resolver(registry)
             resolver.getTranslationClass(Strings::class)
-            registry.registerBundle(object : Bundle() {
+            registry.registerDefinition(object : Bundle() {
                 override val locale = Locales.EN
 
                 override fun register(translations: BundleScope) {

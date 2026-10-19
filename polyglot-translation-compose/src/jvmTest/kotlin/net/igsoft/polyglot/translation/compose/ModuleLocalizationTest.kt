@@ -11,6 +11,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
@@ -19,10 +20,45 @@ import kotlinx.coroutines.withTimeout
 import net.igsoft.polyglot.locale.Locales
 import net.igsoft.polyglot.translation.Bundle
 import net.igsoft.polyglot.translation.BundleScope
+import net.igsoft.polyglot.translation.DiagnosticResolver
 import net.igsoft.polyglot.translation.Registry
 import net.igsoft.polyglot.translation.Resolver
 
 class ModuleLocalizationTest {
+    @Test
+    fun `Given diagnostic resolver in Compose when recomposing then share results and refresh changed sources`() {
+        var creations = 0
+        val registry = Registry()
+        registry.registerTranslationClass<Strings>(Locales.EN) { Strings("Value ${++creations}") }
+        val diagnostics = DiagnosticResolver(registry)
+        val iteration = mutableStateOf(0)
+        var observed: Strings? = null
+
+        withComposition(
+            content = {
+                iteration.value
+                AppLocalizationProvider(diagnostics.resolver, Locales.PL) {
+                    observed = rememberTranslations<Strings>()
+                }
+            },
+        ) {
+            val first = diagnostics.resolve<Strings>(Locales.PL)
+            assertSame(observed, first.value)
+            assertTrue(first.diagnostics.cacheHit)
+            assertEquals(1, creations)
+
+            registry.registerTranslationClass<Strings>(Locales.PL) { Strings("Value ${++creations}") }
+            iteration.value += 1
+            recompose()
+
+            val updated = diagnostics.resolve<Strings>(Locales.PL)
+            assertSame(observed, updated.value)
+            assertTrue(updated.diagnostics.cacheHit)
+            assertEquals("Value 2", updated.value.label)
+            assertEquals(2, creations)
+        }
+    }
+
     @Test
     fun `Given composition locale different from resolver locale when resolving then use composition locale`() {
         val registry = Registry()
@@ -145,7 +181,7 @@ class ModuleLocalizationTest {
         ) {
             assertEquals("Fallback", observed?.label)
 
-            registry.registerBundle(object : Bundle() {
+            registry.registerDefinition(object : Bundle() {
                 override val locale = Locales.PL
 
                 override fun register(translations: BundleScope) {

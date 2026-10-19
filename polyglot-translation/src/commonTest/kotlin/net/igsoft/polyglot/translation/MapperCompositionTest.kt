@@ -340,7 +340,7 @@ class MapperCompositionTest {
         val resolver = Resolver(registry)
         assertThat(resolver.getTranslationClass(ComponentStrings::class, portuguese).confirm).isEqualTo("Confirmar")
 
-        registry.registerBundle(applicationMapper())
+        registry.registerDefinition(applicationMapper())
         assertThat(resolver.getTranslationClass(ComponentStrings::class, portuguese).confirm).isEqualTo("OK")
 
         registry.registerTranslationClass(portuguese, CommonStrings::class) { CommonStrings("Updated OK") }
@@ -353,7 +353,7 @@ class MapperCompositionTest {
         val resolver = Resolver(registry)
         assertThat(resolver.getTranslationClass(ComponentStrings::class, brazilianPortuguese).phone).isEqualTo("Telemóvel")
 
-        registry.registerBundle(componentBundle(brazilianPortuguese, phone = "Celular"))
+        registry.registerDefinition(componentBundle(brazilianPortuguese, phone = "Celular"))
 
         assertThat(resolver.getTranslationClass(ComponentStrings::class, brazilianPortuguese).phone).isEqualTo("Celular")
     }
@@ -364,7 +364,7 @@ class MapperCompositionTest {
         val resolver = Resolver(registry)
         assertThat(resolver.getTranslationClass(ComponentStrings::class, brazilianPortuguese).confirm).isEqualTo("Confirmar")
 
-        registry.registerBundle(commonBundle(portuguese, "OK"))
+        registry.registerDefinition(commonBundle(portuguese, "OK"))
 
         assertThat(resolver.getTranslationClass(ComponentStrings::class, brazilianPortuguese).confirm).isEqualTo("OK")
     }

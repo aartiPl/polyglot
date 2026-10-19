@@ -34,7 +34,7 @@ class RegistrationApiTest {
         val definitions: List<Definition> = listOf(bundle, mapper)
         val aggregate = object : Module() {
             override fun register(registration: ModuleScope) {
-                definitions.forEach(registration::registerBundle)
+                definitions.forEach(registration::registerDefinition)
             }
         }
         val resolver = Resolver(Registry(listOf(aggregate)))
